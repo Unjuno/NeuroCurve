@@ -13,6 +13,7 @@
     "test": "node --test tests/*.test.js",
     "check": "node scripts/check.js",
     "build:offline": "node scripts/build-offline.js",
-    "benchmark": "node scripts/integration-benchmark.js"
+    "benchmark": "node scripts/integration-benchmark.js",
+    "test:sites": "node --test tests/sites.test.js"
   }
 }
