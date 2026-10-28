@@ -4,7 +4,7 @@
 
 v0.9.0 GPU対応候補版。Apache-2.0。ログインなし、下書き自動保存なし、公開一覧なし。
 
-> **状態**: 実行可能なアプリケーションとテストを同梱しています。公開ホスティングへのデプロイ、実機Safari/Firefox検証、本番CDNと復旧運用の検証は未完了です。GitHubの既存リポジトリは変更していません。
+> **状態**: ChatGPT Sites向けの静的・端末内版ビルドを追加しました。公開版では共有・削除・通報を無効化します。Sitesの本番公開、D1/R2共有サービス、本番CDNと復旧運用、実機Safari/Firefox/WebGPUの検証は別途必要です。
 
 ## すぐ動かす
 
@@ -20,6 +20,10 @@ npm start
 この起動方法では同じPCからの利用に限定します。共有URLを他人の端末から開けるようにするには、[公開運用の手順](docs/OPERATIONS.md)に沿ったHTTPSホスティングが必要です。
 
 `dist/NeuroCurve-local.html` は、解析と学習専用の単一HTML版です。保存してブラウザで開けます。サーバーがないため投稿・削除・共有URLの発行は無効です。モバイルのファイルプレビューはJavaScriptを実行しない場合があります。
+
+### ChatGPT Sites static edition
+
+`npm run build:sites-static` creates the standalone browser-local edition and copies its static assets into `dist/` for Sites. Function design, analysis, exports and training stay on the visitor's device. **Anonymous sharing, deletion, reports and shared-function URLs remain disabled in this static edition**; enable them only after a Sites Worker and persistent D1/R2 bindings are provisioned and verified. The current `sites/worker.js` is a compatibility candidate and is not wired into this static artifact.
 
 ## 実装した機能
 
@@ -77,7 +81,7 @@ python tests/browser.py
 
 `tests/browser.py`は、先に`PUBLIC_ORIGIN=http://127.0.0.1:4173 PORT=4173 npm start`で起動したサーバーを使います。`CHROMIUM_PATH`でChromium実行ファイル、`TEST_URL`でURLを指定できます。テスト投稿が3回/時制限に達した場合は専用のテスト用DBで実行してください。本番DBに対して実行しないでください。
 
-今回の環境ではブラウザの全URLが管理ポリシーでブロックされています。WebGPU実機検証もその理由で未実施です。ポリシーを変更せず、`tests/dom_offline.py`で実ソースをabout:blankへ読み込んでDOMを検査しました。HTTP APIテストとNode Workerアダプタのテストは実行していますが、**ブラウザから公開URLへのE2E、実機WebGPUのコンパイル・学習を通過したという意味ではありません**。
+ローカルのSitesプレビューで手描きとTwo MoonsのCPU高速試験を確認しました。実機WebGPUのコンパイル・学習、Safari/Firefox、Sitesの本番共有APIの確認は未実施です。したがって、**この確認は公開後E2EやGPU受け入れ試験を通過したという意味ではありません**。
 
 [検証報告](docs/VERIFICATION.md)には、通過・未確認・再実行方法を分けて記載しています。実測ログは`evidence/`にあります。過去の会話内のベンチマークは、この実装の検証値として流用していません。
 
