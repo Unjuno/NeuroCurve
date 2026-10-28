@@ -1,4 +1,4 @@
-import {runBenchmark} from './core/training.js';
+import {runBenchmark,runSuite} from './core/training.js';
 import {probeWebGPU,preflightGpuTraining,trainOneGpu} from './core/webgpu.js';
 import {loadDataset,makeDataset} from './core/data.js';
 import {analyze,ENGINE} from './core/activation.js';
@@ -21,7 +21,8 @@ self.onmessage=async({data})=>{
   }
   const effective=gpu?.available?'webgpu-compute':'native-js-cpu';
   self.postMessage({type:'backend',selected:preference,effective,reason:gpu?.available?'WebGPUコンピュート演算と学習カーネルを検証しました。':gpu?.reason??'CPUを選択しました。',dtype:gpu?.available?'float32':'float64'});
-  const result=await runBenchmark(data.definition,data.dataset,data.mode,e=>self.postMessage(e),()=>false,null,gpu?.available?trainOneGpu:null,gpu?.available?gpu.device:null);
+  const runner=gpu?.available?trainOneGpu:null;
+  const result=data.scope&&data.scope!=='single'?await runSuite(data.definition,data.scope,data.mode,e=>self.postMessage(e),()=>false,runner,gpu?.available?gpu.device:null):await runBenchmark(data.definition,data.dataset,data.mode,e=>self.postMessage(e),()=>false,null,runner,gpu?.available?gpu.device:null);
   result.backendSelection={requested:preference,effective,gpuVerified:!!gpu?.available,fallbackReason:!gpu?.available?gpu?.reason??null:null};
   self.postMessage({type:'complete',result});
  }catch(error){self.postMessage({type:'error',message:String(error.message??error)});}
