@@ -24,6 +24,11 @@ const source='window.NC_OFFLINE_MODE=true;\n'+modules()+'\nwindow.NC_OFFLINE_WOR
 let html=read('index.html').replace(/<script[^>]*src=[^>]*>\s*<\/script>/g,'').replace(/<link[^>]+>/g,'');
 html=html.replace('</head>','<style>'+read('style.css')+'</style></head>').replace(/href="\/"/g,'href="#main"').replace(/href="\/policy.html"/g,'href="#offline-policy"');
 html=html.replace('<section class="intro">','<div class="notice"><strong>端末内版</strong><span>解析と学習はローカルで動作します。対応端末ではWebGPU、その他はCPUで処理します。投稿・削除・共有URLの発行にはサーバー版が必要です。</span></div><section class="intro">');
+// The standalone Sites build has no server-side share API. Keep sharing and
+// moderation controls unavailable, and replace the hosted edition's retention
+// statement so the interface never implies that local work is uploaded.
+html=html.replace('作業内容は自動保存しません。タブを閉じると失われます。公開投稿だけが、同意した期限までサーバーに保存されます。','作業内容・学習結果は自動保存も送信もしません。共有投稿・削除・通報はこの端末内版では利用できません。');
+html=html.replace('<button id="manage-button"','<button disabled id="manage-button"').replace('<button id="report-button"','<button disabled id="report-button"');
 const policy=read('policy.html').match(/<main class="policy">([\s\S]*?)<\/main>/)[1].replace(/<a href="\/">[^<]*<\/a>/g,'');
 html=html.replace('</main>','<details id="offline-policy" class="panel policy"><summary>利用条件・プライバシー・データ出典</summary>'+policy+'</details></main>');
 html=html.replace('</body>','<script>'+source.replace(/<\/script/gi,'<\\/script')+'</script></body>');
