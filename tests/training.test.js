@@ -1,0 +1,12 @@
+import test from 'node:test';import assert from 'node:assert/strict';
+import { makeDataset } from '../public/core/data.js';
+import { Network, trainOne, runBenchmark, summarize } from '../public/core/training.js';
+import { compileDefinition } from '../public/core/activation.js';
+const def={schema:1,engine:'neurocurve-1',kind:'preset',name:'swish',domain:[-6,8]};
+test('same seed gives same generated data and independent splits',()=>{const a=makeDataset('moons'),b=makeDataset('moons');assert.deepEqual(a,b);assert.equal(a.train.length+a.validation.length+a.test.length,3000);assert.equal(new Set([...a.train,...a.validation,...a.test].map(x=>x.id)).size,3000);});
+test('backpropagation matches parameter finite differences',()=>{const n=new Network([2,3,2],compileDefinition(def),7),batch=[{x:[.2,-.8],y:1},{x:[-.7,.1],y:0}];n.lossAndGrad(batch,'classification');const analytic=n.layers.map(l=>Array.from(l.g));for(let layer=0;layer<n.layers.length;layer++){const l=n.layers[layer];for(let i=0;i<l.w.length;i++){const w=l.w[i],h=1e-5;l.w[i]=w+h;const plus=n.loss(batch,'classification');l.w[i]=w-h;const minus=n.loss(batch,'classification');l.w[i]=w;assert.ok(Math.abs((plus-minus)/2/h-analytic[layer][i])<1e-5);}}});
+test('real learning reduces loss and is deterministic',async()=>{const data=makeDataset('moons');const opts={steps:50,batch:32,hidden:[12,12],learningRate:.005,seed:17};const a=await trainOne(def,data,opts),b=await trainOne(def,data,opts);assert.ok(a.finalTrainLoss<a.initialTrainLoss);assert.equal(a.test.metric,b.test.metric);assert.deepEqual(a.history,b.history);assert.equal(a.backend,'native-js-cpu');});
+test('regression trains and returns RMSE',async()=>{const r=await trainOne(def,makeDataset('wave'),{steps:30,batch:32,hidden:[12,12],learningRate:.005,seed:17});assert.equal(r.metricName,'RMSE');assert.ok(Number.isFinite(r.test.metric));assert.ok(r.finalTrainLoss<r.initialTrainLoss);});
+test('unsafe definition cannot run',async()=>{await assert.rejects(()=>runBenchmark({...def,kind:'expression',expression:'1/x'},'moons','quick'));});
+test('cancel propagates as an abort',async()=>{await assert.rejects(()=>trainOne(def,makeDataset('moons'),{steps:50,batch:16,hidden:[8,8],seed:17},()=>{},()=>true),/中断/);});
+test('summary separates repeated-seed uncertainty from evidence of superiority',()=>{const r=summarize([{name:'Custom',seed:1,test:{metric:.8},elapsedMs:10},{name:'Swish',seed:1,test:{metric:.7},elapsedMs:9}],false);assert.equal(r.groups.length,2);assert.equal(r.comparisons[0].verdict,'UNCERTAIN');});

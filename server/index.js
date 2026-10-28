@@ -1,0 +1,10 @@
+import {resolve} from 'node:path';import {randomBytes} from 'node:crypto';import {ShareStore} from './store.js';import {createApp} from './app.js';
+const port=Number(process.env.PORT??4173),origin=process.env.PUBLIC_ORIGIN??`http://localhost:${port}`,production=process.env.NODE_ENV==='production';
+if(new URL(origin).origin!==origin)throw new Error('PUBLIC_ORIGINは末尾スラッシュ・パスなしの完全なoriginを指定してください。');
+if(production&&(!origin.startsWith('https://')||!process.env.RATE_SALT||process.env.RATE_SALT.length<32))throw new Error('本番ではHTTPS PUBLIC_ORIGINと32文字以上のRATE_SALTを設定してください。');
+const store=new ShareStore({path:process.env.DATA_PATH??resolve('.runtime/content.sqlite'),ledgerPath:process.env.LEDGER_PATH??resolve('.revocations/ledger.sqlite'),salt:process.env.RATE_SALT??randomBytes(32).toString('hex')});
+store.cleanup(Date.now());
+const server=createApp({store,publicOrigin:origin,publicDir:resolve('public'),adminToken:process.env.ADMIN_TOKEN,trustedProxyIPs:(process.env.TRUSTED_PROXY_IPS??'').split(',').map(s=>s.trim()).filter(Boolean)});
+const timer=setInterval(()=>{try{store.cleanup(Date.now());}catch{console.error('Retention maintenance failed; investigate storage health.');}},3600000).unref();
+server.listen(port,process.env.HOST??'127.0.0.1',()=>console.log(`NeuroCurve: ${origin} (local CPU/WebGPU learning; server only stores opt-in shares)`));
+for(const sig of ['SIGINT','SIGTERM'])process.on(sig,()=>{clearInterval(timer);server.close(()=>{store.checkpoint();store.close();process.exit(0);});});

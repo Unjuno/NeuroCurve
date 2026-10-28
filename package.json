@@ -1,0 +1,18 @@
+{
+  "name": "neurocurve",
+  "version": "0.9.0",
+  "private": true,
+  "description": "Draw, analyze and locally benchmark activation functions. Opt-in expiring shares.",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=22.16.0"
+  },
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test tests/*.test.js",
+    "check": "node scripts/check.js",
+    "build:offline": "node scripts/build-offline.js",
+    "benchmark": "node scripts/integration-benchmark.js"
+  }
+}
