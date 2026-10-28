@@ -1,0 +1,9 @@
+.git
+.runtime
+.revocations
+.env
+.env.*
+node_modules
+evidence
+__pycache__
+*.sqlite

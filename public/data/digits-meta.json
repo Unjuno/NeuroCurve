@@ -1,0 +1,13 @@
+{
+  "sha256": "f984821d12b8b038b539d9ce08387af6ec203cb77e86039f8bb5c25226d2a3ac",
+  "samples": 1797,
+  "features": 64,
+  "pixel_range": [
+    0,
+    16
+  ],
+  "version": "digits-uci-v1",
+  "attribution": "E. Alpaydin and C. Kaynak (1998), Optical Recognition of Handwritten Digits. UCI Machine Learning Repository. DOI:10.24432/C50P49. Subset distributed by scikit-learn.",
+  "license": "CC BY 4.0",
+  "source": "https://archive.ics.uci.edu/dataset/80/optical+recognition+of+handwritten+digits"
+}

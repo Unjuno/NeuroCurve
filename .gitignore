@@ -1,0 +1,12 @@
+node_modules/
+.runtime/
+.revocations/
+.env
+.env.*
+!.env.example
+*.sqlite
+*.sqlite-wal
+*.sqlite-shm
+backups/
+__pycache__/
+.DS_Store
