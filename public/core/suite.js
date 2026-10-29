@@ -20,19 +20,26 @@ const metricError=(v,type)=>type==='classification'?1-v:v;
 function scoreTask(report){
  const type=DATASET_TASK[report.dataset],expected=report.settings?.seeds;
  if(!type||!Array.isArray(expected)||!expected.length||new Set(expected).size!==expected.length||!Array.isArray(report.runs))return null;
+ const names=['Custom','ReLU','Swish','GELU'];
+ // Extra/failed/off-protocol runs must never be omitted from the final grade.
+ if(report.runs.length!==expected.length*names.length||report.runs.some(r=>!names.includes(r.name)||!expected.includes(r.seed)))return null;
  const scores=[],raw=[],references=[],diffs=[];
+ let backend=null,dtype=null;
  for(const seed of expected){
-  const rows=['Custom','ReLU','Swish','GELU'].map(name=>{
+  const rows=names.map(name=>{
    const match=report.runs.filter(r=>r.name===name&&r.seed===seed);
    return match.length===1?match[0]:null;
   });
   if(rows.some(r=>!r||r.failed||!r.test||!isValidMetric(r.test.metric,type)))return null;
   if(new Set(rows.map(r=>r.backend)).size!==1||new Set(rows.map(r=>r.dtype)).size!==1)return null;
+  if(typeof rows[0].backend!=='string'||!rows[0].backend||typeof rows[0].dtype!=='string'||!rows[0].dtype)return null;
+  if(backend!==null&&(backend!==rows[0].backend||dtype!==rows[0].dtype))return null;
+  backend=rows[0].backend;dtype=rows[0].dtype;
   const custom=metricError(rows[0].test.metric,type);
   const baseline=median(rows.slice(1).map(r=>metricError(r.test.metric,type)));
   scores.push(relativeTaskScore(custom,baseline));raw.push(rows[0].test.metric);references.push(type==='classification'?1-baseline:baseline);diffs.push(type==='classification'?rows[0].test.metric-(1-baseline):baseline-rows[0].test.metric);
  }
- return {id:report.dataset,label:TASK_LABEL[report.dataset],type,score:round(median(scores)),nSeeds:scores.length,customMedian:median(raw),baselineMedian:median(references),medianImprovement:median(diffs),scoreMin:round(Math.min(...scores)),scoreMax:round(Math.max(...scores)),datasetVersion:report.datasetVersion,mode:report.mode,backend:report.runs[0]?.backend,dtype:report.runs[0]?.dtype};
+ return {id:report.dataset,label:TASK_LABEL[report.dataset],type,score:round(median(scores)),nSeeds:scores.length,customMedian:median(raw),baselineMedian:median(references),medianImprovement:median(diffs),scoreMin:round(Math.min(...scores)),scoreMax:round(Math.max(...scores)),datasetVersion:report.datasetVersion,mode:report.mode,backend,dtype};
 }
 /** Incomplete/failed tasks are never silently omitted from the overall score. */
 export function scoreSuite(reports,suiteId='core'){
@@ -40,7 +47,8 @@ export function scoreSuite(reports,suiteId='core'){
  if(!Array.isArray(reports))throw new Error('評価データが不正です。');
  const tasks=suite.tasks.map(id=>{const matching=reports.filter(r=>r.dataset===id);return matching.length===1?scoreTask(matching[0]):null;});
  const sameMode=reports.length>0&&new Set(reports.map(r=>r.mode)).size===1;
- const complete=reports.length===suite.tasks.length&&sameMode&&tasks.every(Boolean);
+ const sameBackend=tasks.every(Boolean)&&new Set(tasks.map(t=>t.backend)).size===1&&new Set(tasks.map(t=>t.dtype)).size===1;
+ const complete=reports.length===suite.tasks.length&&sameMode&&sameBackend&&tasks.every(Boolean);
  const categories={};for(const [key,ids]of Object.entries(suite.categories)){
   const values=ids.map(id=>tasks.find(t=>t?.id===id)?.score);
   categories[key]=values.every(Number.isFinite)?round(mean(values)):null;

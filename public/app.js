@@ -10,8 +10,9 @@ const fmt=(v,d=3)=>Number.isFinite(v)?v.toFixed(d):'—',pct=v=>Number.isFinite(
 function toast(message){$('toast').textContent=message;$('toast').style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').style.display='none',5000);}
 function download(name,data,type='application/json'){const blob=data instanceof Blob?data:new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);}
 async function copy(text){try{await navigator.clipboard.writeText(text);toast('コピーしました。');}catch{toast('コピーできません。入力欄を選択してコピーしてください。');}}
+function invalidateScore(){if(state.result){state.scoreStale=true;syncScoreStale();}}
 function setDef(d,{history=true,controls=false}={}){
-  try{const clean=validateDefinition(d);if(history){state.history.push(snapshot());if(state.history.length>50)state.history.shift();state.future=[];}state.def=clean;state.dirty=true;if(state.result){state.scoreStale=true;syncScoreStale();}if(controls)refreshControls();scheduleRender();}
+  try{const clean=validateDefinition(d);if(history){state.history.push(snapshot());if(state.history.length>50)state.history.shift();state.future=[];}state.def=clean;state.dirty=true;invalidateScore();if(controls)refreshControls();scheduleRender();}
   catch(e){toast(e.message);}
 }
 function scheduleRender(){clearTimeout(renderTimer);renderTimer=setTimeout(render,35);}
@@ -88,7 +89,7 @@ $('curve-canvas').addEventListener('pointermove',event=>{const p=pointerCoord(ev
 });
 function finishGesture(){if(!gesture)return;const g=gesture;gesture=null;
   if(g.points){try{if(g.points.length>512)throw new Error('制御点が512点を超えました。短いストロークで描き直してください。');let points=g.points;if(points.length<2)return;const direction=Math.sign(points.at(-1)[0]-points[0][0]);if(direction<0)points=[...points].reverse();const clean=[];for(const p of points){if(clean.length&&Math.abs(p[0]-clean.at(-1)[0])<1e-12&&Math.abs(p[1]-clean.at(-1)[1])<1e-12)continue;clean.push(p);}const d={schema:1,engine:'neurocurve-1',kind:'sketch',points:clean,domain:[clean[0][0],clean.at(-1)[0]]};validateDefinition(d);setDef(d,{controls:true});$('fit-note').textContent=`${clean.length}点をPCHIP補間。制御点位置では描画値と一致します（丸め誤差を除く）。`;}catch(e){toast(e.message);render();}}
-  else{state.history.push({definition:g.before,origin:clone(state.source)});state.future=[];state.dirty=true;refreshControls();render();}
+  else{state.history.push({definition:g.before,origin:clone(state.source)});state.future=[];state.dirty=true;invalidateScore();refreshControls();render();}
 }
 $('curve-canvas').addEventListener('pointerup',finishGesture);$('curve-canvas').addEventListener('pointercancel',()=>{if(gesture)state.def=gesture.before;gesture=null;render();});
 all('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));all('[data-mode]').forEach(b=>b.onclick=()=>mode(b.dataset.mode));
@@ -97,7 +98,7 @@ $('hero-benchmark').onclick=()=>{tab('learning');$('learning-panel').scrollIntoV
 $('clear-sketch').onclick=()=>{if(state.mode!=='sketch')return;const [min,max]=state.def.domain;setDef({schema:1,engine:'neurocurve-1',kind:'sketch',domain:[min,max],points:[[min,0],[max,0]]},{controls:true});toast('下書きの直線に戻しました。グラフ上に新しい線を描いてください。');};
 $('go-analysis').onclick=()=>{tab('analysis');$('analysis-panel').scrollIntoView({behavior:'smooth',block:'start'});};$('go-learning').onclick=()=>tab('learning');
 $('reset').onclick=()=>{state.mode='valleys';setDef(defaultDefinition(),{controls:true});state.source=null;state.shared=null;$('shared-banner').classList.add('hidden');refreshControls();};
-$('undo').onclick=()=>{if(!state.history.length)return;state.future.push(snapshot());const record=state.history.pop();state.def=record.definition;state.source=record.origin;state.mode=state.def.kind;refreshControls();render();};$('redo').onclick=()=>{if(!state.future.length)return;state.history.push(snapshot());const record=state.future.pop();state.def=record.definition;state.source=record.origin;state.mode=state.def.kind;refreshControls();render();};
+$('undo').onclick=()=>{if(!state.history.length)return;state.future.push(snapshot());const record=state.history.pop();state.def=record.definition;state.source=record.origin;state.mode=state.def.kind;state.dirty=true;invalidateScore();refreshControls();render();};$('redo').onclick=()=>{if(!state.future.length)return;state.history.push(snapshot());const record=state.future.pop();state.def=record.definition;state.source=record.origin;state.mode=state.def.kind;state.dirty=true;invalidateScore();refreshControls();render();};
 $('depth-square').onclick=()=>{const d=clone(state.def);d.params.depthPower=2;d.params.depthGrowth=1;d.params.depth=.02;setDef(d,{controls:true});toast('段番号の2乗で深さを増やしました。曲線全体の二乗ではありません。');};
 for(const [name,label]of Object.entries(PRESETS)){const b=document.createElement('button');b.textContent=label;b.onclick=()=>setDef({schema:1,engine:'neurocurve-1',kind:'preset',name,domain:[...state.def.domain]});$('preset-buttons').append(b);}
 $('apply-expression').onclick=()=>{const d={schema:1,engine:'neurocurve-1',kind:'expression',expression:$('expression-input').value,domain:[...state.def.domain]};try{validateDefinition(d);$('expression-error').textContent='';setDef(d);}catch(e){$('expression-error').textContent=e.message;}};

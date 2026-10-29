@@ -42,3 +42,27 @@ test('ten reproducible benchmark datasets have known shape and disjoint splits',
   assert.ok(d.train.every(r=>r.x.every(Number.isFinite)));
  }
 });
+
+test('score rejects extra failed or off-protocol runs instead of hiding them',()=>{
+ const reports=SUITES.core.tasks.map(task=>result(task,17,task==='wave'||task==='chirp'?.21:.84,task==='wave'||task==='chirp'?.26:.80));
+ const broken=structuredClone(reports);
+ broken[0].runs.push({name:'Custom',seed:29,failed:true,error:'extra trial failed'});
+ assert.equal(scoreSuite(broken,'core').complete,false);
+});
+
+test('score rejects CPU and GPU mixed between seeds of one task',()=>{
+ const reports=SUITES.core.tasks.map(task=>result(task,17,task==='wave'||task==='chirp'?.21:.84,task==='wave'||task==='chirp'?.26:.80));
+ const report=reports[0];
+ report.mode='full';report.settings.seeds=[17,29];
+ report.runs.push(...report.runs.map(r=>({...r,seed:29,backend:'webgpu-compute',dtype:'float32'})));
+ for(const other of reports.slice(1)){
+  other.mode='full';other.settings.seeds=[17,29];other.runs.push(...other.runs.map(r=>({...r,seed:29})));
+ }
+ assert.equal(scoreSuite(reports,'core').complete,false);
+});
+
+test('official suite rejects cross-task backend or precision mismatches',()=>{
+ const reports=SUITES.core.tasks.map(task=>result(task,17,task==='wave'||task==='chirp'?.21:.84,task==='wave'||task==='chirp'?.26:.80));
+ reports[3].runs.forEach(r=>{r.backend='webgpu-compute';r.dtype='float32';});
+ assert.equal(scoreSuite(reports,'core').complete,false);
+});

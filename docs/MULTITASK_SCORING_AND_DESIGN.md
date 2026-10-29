@@ -19,7 +19,7 @@ Raw task metrics MUST remain visible. Classification uses error=1-accuracy; regr
 
 Task score is median over seeds. A category score is the arithmetic mean of its member task scores. Overall is the arithmetic mean of the **four category scores** (nonlinear, vision, tabular, signal), rounded to two decimals. 50 = benchmark reference; higher than 50 = lower task error than median baseline, lower than 50 = higher error. All numbers are dimensionless; accuracy and RMSE are never averaged directly.
 
-If any required task/run fails or is missing, overall is `null`, not a partial grade. A run with one seed is `exploratory`; five seeds are `multi-seed descriptive` (not statistically confirmed). No public ranking is created. No client score is server-verified. Changing the curve marks the prior score stale until rerun.
+Any extra, failed, duplicated, missing or off-protocol run invalidates the suite score. All seeds and tasks must use a consistent compute backend and numeric precision. The UI invalidates the old score after drawing, point dragging, undo, redo or changing the function definition. If any required task/run fails or is missing, overall is `null`, not a partial grade. A run with one seed is `exploratory`; five seeds are `multi-seed descriptive` (not statistically confirmed). No public ranking is created. No client score is server-verified. Changing the curve marks the prior score stale until rerun.
 
 ## UX / visual design
 
