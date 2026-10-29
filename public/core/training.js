@@ -1,3 +1,4 @@
+import {SUITES,scoreSuite} from './suite.js';
 import {rng,normal,makeDataset,loadDataset} from './data.js';
 import {compileDefinition,analyze,wells,ENGINE,selfTest} from './activation.js';
 /** Minimal audited MLP. Float64 arrays, analytic activation derivatives, Adam. */
@@ -70,4 +71,26 @@ export function summarize(runs,lowerIsBetter){
   const names=[...new Set(runs.map(r=>r.name))],groups=names.map(name=>{const all=runs.filter(r=>r.name===name),a=all.filter(r=>!r.failed&&r.test&&Number.isFinite(r.test.metric)),values=a.map(r=>r.test.metric);return {name,n:a.length,failures:all.length-a.length,mean:a.length?mean(values):null,median:a.length?median(values):null,min:a.length?Math.min(...values):null,max:a.length?Math.max(...values):null,sd:a.length>1?Math.sqrt(values.reduce((s,v)=>s+(v-mean(values))**2,0)/(a.length-1)):null,elapsedMedianMs:a.length?median(a.map(r=>r.elapsedMs)):null};});
   const custom=runs.filter(r=>r.name==='Custom'&&!r.failed),comparisons=names.filter(n=>n!=='Custom').map(name=>{const pairs=custom.flatMap(c=>{const b=runs.find(r=>r.name===name&&r.seed===c.seed&&!r.failed);return b?[c.test.metric-b.test.metric]:[];}),n=pairs.length,m=n?mean(pairs):null,se=n>1?Math.sqrt(pairs.reduce((s,v)=>s+(v-m)**2,0)/(n-1)/n):null;return {baseline:name,pairs:n,meanDifference:m,standardError:se,descriptive95Interval:n===5?[m-2.776*se,m+2.776*se]:null,lowerIsBetter,verdict:'UNCERTAIN',reason:'固定分割・少数シード。一般的優位性は未検証。'};});
   return {groups,comparisons,lowerIsBetter};
+}
+
+/** Run an entire fixed suite on the visitor's own worker; task-level scores are transparent. */
+export async function runSuite(def,suiteId='core',mode='quick',onEvent=()=>{},cancelled=()=>false,gpuRunner=null,gpuDevice=null){
+  const suite=SUITES[suiteId];if(!suite)throw new Error('評価セットが不正です。');
+  if(!Object.hasOwn(MODES,mode))throw new Error('評価モードが不正です。');
+  const reports=[];
+  for(const [taskIndex,dataset] of suite.tasks.entries()){
+    if(cancelled())throw new Error('学習を中断しました。');
+    onEvent({type:'suite-task-start',taskIndex,taskCount:suite.tasks.length,dataset});
+    try{
+      const report=await runBenchmark(def,dataset,mode,event=>onEvent({...event,taskIndex,taskCount:suite.tasks.length,dataset}),cancelled,null,gpuRunner,gpuDevice);
+      reports.push(report);
+      onEvent({type:'suite-task-end',taskIndex,taskCount:suite.tasks.length,dataset,report,score:scoreSuite(reports,suiteId)});
+    }catch(error){
+      if(cancelled())throw error;
+      const failed={dataset,mode,datasetVersion:'unavailable',settings:MODES[mode],runs:[],error:String(error?.message??error)};
+      reports.push(failed);
+      onEvent({type:'suite-task-end',taskIndex,taskCount:suite.tasks.length,dataset,report:failed,score:scoreSuite(reports,suiteId)});
+    }
+  }
+  return {version:2,kind:'suite',suiteId:suite.id,createdAt:new Date().toISOString(),definition:def,mode,settings:MODES[mode],reports,score:scoreSuite(reports,suiteId),note:'Fixed, local multi-task comparative evaluation; do not treat scores as verified ranking or proof of superiority.'};
 }

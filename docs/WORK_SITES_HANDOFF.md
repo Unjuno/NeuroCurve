@@ -2,6 +2,19 @@
 
 状態: **Sites対応の実装候補を用意。ChatGPT Sitesへの公開は未実施。**
 
+
+## v1.0 candidate — Multi-task scoring and redesigned Learning Lab
+
+A new candidate implementation on a separate feature branch (do not overwrite this Sites PR directly) adds:
+- Core six-task and extended ten-task local benchmark suites.
+- CC BY 4.0 UCI Iris, Wine, WDBC and synthetic Circles, Spiral, XOR, Chirp with attribution and SHA-256 checks.
+- Category-balanced baseline-relative game score (baseline=50), every task required, no trust claims or leaderboards.
+- Responsive dark-navy/emerald studio hero, onboarding drawing shortcut, scientific per-task metrics, local SVG scorecard export.
+- Dependency-free `npm run build:sites-static` keeps anonymous sharing DISABLED until actual Sites bindings/API are connected and tested.
+- `npm run benchmark:suite` executes 6 tasks x 4 functions x 1 seed x 150 updates on CPU. Browser HTML acceptance requires pointer-drawing, analysis, six-task training, score export.
+
+**Important:** Training and local share-card export do not implement publishable URL sharing. D1/R2 and `/api/config` remain required. Do not claim publication is complete on the static project. Existing live URL must be preserved when deploying from Work.
+
 ## 1. 目的と禁止事項
 
 Railway / Vercel / 常駐のNode専用サーバーへの新規デプロイは不要。**ChatGPT Workの@Sites** を使用し、まずプライベートプレビューを生成して実機検証、その後に公開範囲を「Public」に設定する。

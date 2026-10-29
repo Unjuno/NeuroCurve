@@ -5,14 +5,15 @@ import {createHash} from 'node:crypto';
 const publicDir=new URL('../public/',import.meta.url);
 const read=name=>readFileSync(new URL(name,publicDir),'utf8');
 const digits=read('data/digits-v1.json');
+const packaged=Object.fromEntries(['digits','iris','wine','breast'].map(id=>[id,JSON.parse(read('data/'+id+'-v1.json'))]));
 const meta=JSON.parse(read('data/digits-meta.json'));
 if(createHash('sha256').update(digits).digest('hex')!==meta.sha256)throw new Error('Digits integrity mismatch');
-const order=['core/expression.js','core/activation.js','core/data.js','core/training.js','core/webgpu.js','core/export.js'];
+const order=['core/expression.js','core/activation.js','core/data.js','core/suite.js','core/training.js','core/webgpu.js','core/export.js'];
 function rewriteImports(text,name){return text.replace(/import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?/g,(_,names,dep)=>'const {'+names+'}=globalThis.NC_BUNDLE['+JSON.stringify(posix.normalize(posix.join(posix.dirname(name),dep)))+'];');}
 function modules({withDigits=false}={}){
  let text='globalThis.NC_BUNDLE={};\n';
  for(const name of order){let source=read(name);const exported=[...source.matchAll(/export\s+(?:async\s+)?(?:function|class|const|let)\s+(\w+)/g)].map(m=>m[1]);
-  if(name==='core/data.js')source=source.replace(/export async function loadDataset\(name\)\{[\s\S]*$/,withDigits?'export async function loadDataset(name){return makeDataset(name,name===\'digits\'?'+digits.trim()+':null);}\n':"export async function loadDataset(name){if(name==='digits')throw new Error('Use packaged Worker for Digits');return makeDataset(name);}\n");
+  if(name==='core/data.js')source=source.replace(/export async function loadDataset\(name\)\{[\s\S]*$/,withDigits?'export async function loadDataset(name){const files='+JSON.stringify(packaged)+';return makeDataset(name,files[name]??null); }\n':"export async function loadDataset(name){return makeDataset(name); }\n");
   source=rewriteImports(source,name).replace(/\bexport\s+/g,'');
   text+='globalThis.NC_BUNDLE['+JSON.stringify(name)+']=(()=>{\n'+source+'\nreturn {'+exported.join(',')+'};})();\n';
  }
@@ -24,11 +25,6 @@ const source='window.NC_OFFLINE_MODE=true;\n'+modules()+'\nwindow.NC_OFFLINE_WOR
 let html=read('index.html').replace(/<script[^>]*src=[^>]*>\s*<\/script>/g,'').replace(/<link[^>]+>/g,'');
 html=html.replace('</head>','<style>'+read('style.css')+'</style></head>').replace(/href="\/"/g,'href="#main"').replace(/href="\/policy.html"/g,'href="#offline-policy"');
 html=html.replace('<section class="intro">','<div class="notice"><strong>端末内版</strong><span>解析と学習はローカルで動作します。対応端末ではWebGPU、その他はCPUで処理します。投稿・削除・共有URLの発行にはサーバー版が必要です。</span></div><section class="intro">');
-// The standalone Sites build has no server-side share API. Keep sharing and
-// moderation controls unavailable, and replace the hosted edition's retention
-// statement so the interface never implies that local work is uploaded.
-html=html.replace('作業内容は自動保存しません。タブを閉じると失われます。公開投稿だけが、同意した期限までサーバーに保存されます。','作業内容・学習結果は自動保存も送信もしません。共有投稿・削除・通報はこの端末内版では利用できません。');
-html=html.replace('<button id="manage-button"','<button disabled id="manage-button"').replace('<button id="report-button"','<button disabled id="report-button"');
 const policy=read('policy.html').match(/<main class="policy">([\s\S]*?)<\/main>/)[1].replace(/<a href="\/">[^<]*<\/a>/g,'');
 html=html.replace('</main>','<details id="offline-policy" class="panel policy"><summary>利用条件・プライバシー・データ出典</summary>'+policy+'</details></main>');
 html=html.replace('</body>','<script>'+source.replace(/<\/script/gi,'<\\/script')+'</script></body>');

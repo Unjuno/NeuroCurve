@@ -24,3 +24,11 @@ NeuroCurve is an anonymous activation-function workbench, not a server-side trai
 - Don't deploy publicly until D1/R2 persistence, rollback/revocation safety, anonymous abuse controls and actual Chrome/Safari/Firefox CPU/GPU fallback have passed independent integration checks.
 - Before creating production Sites bindings, test against development storage. Do not restore an old D1 snapshot without retaining the current independent R2 revocation records.
 - Code is for research; improvements require side-by-side validation with ReLU, Swish and GELU under identical conditions. Always distinguish `PASS`, `FAIL` and `UNCERTAIN`.
+
+## v1.0 benchmark UI candidate
+- Fixed core six-task and extended ten-task suites live in `public/core/suite.js`. Do not average raw Accuracy and RMSE.
+- Game score of 50 means matching median ReLU/Swish/GELU error for the same task; overall is equally weighted across four task categories.
+- Incomplete suites never get an aggregate score. One seed is exploratory. No public scoreboard, accounts or automatic result uploads.
+- Add UI/browser acceptance: actual pointer stroke -> PCHIP -> Core 6 CPU benchmark -> score -> local SVG export.
+- `npm run benchmark:suite` executes real CPU training; `npm run build:sites-static` generates static publishable UI but intentionally has no anonymous API.
+- Sites integration must route actual `/api/config`, POST/GET/DELETE shares and backed storage before the sharing claim can be made.

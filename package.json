@@ -1,6 +1,6 @@
 {
   "name": "neurocurve",
-  "version": "0.9.0",
+  "version": "1.0.0-candidate",
   "private": true,
   "description": "Draw, analyze and locally benchmark activation functions. Opt-in expiring shares.",
   "type": "module",
@@ -15,6 +15,7 @@
     "build:offline": "node scripts/build-offline.js",
     "benchmark": "node scripts/integration-benchmark.js",
     "test:sites": "node --test tests/sites.test.js",
-    "build:sites-static": "node scripts/build-sites-static.js"
+    "build:sites-static": "node scripts/build-sites-static.js",
+    "benchmark:suite": "node scripts/suite-integration.js"
   }
 }

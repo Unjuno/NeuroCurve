@@ -1,16 +1,18 @@
 import {defaultDefinition,validateDefinition,compileDefinition,analyze,PRESETS,PARAMS,samplePoints,inspectSketch} from './core/activation.js';
 import {exportPython,functionCSV,curveSVG} from './core/export.js';
 import {summarize} from './core/training.js';
+import {SUITES,scoreSuite,TASK_LABEL,CATEGORY_LABEL,DATASET_TASK} from './core/suite.js';
 const $=id=>document.getElementById(id),all=s=>[...document.querySelectorAll(s)],clone=x=>structuredClone(x);
-const state={def:defaultDefinition(),analysis:null,mode:'valleys',tab:'studio',history:[],future:[],comparison:null,derivative:false,drawTool:'draw',source:null,shared:null,busy:false,worker:null,result:null,runConfig:null,runs:[],loss:{},config:null,pending:null,dirty:false,backendInfo:null};
+const state={def:defaultDefinition(),analysis:null,mode:'valleys',tab:'studio',history:[],future:[],comparison:null,derivative:false,drawTool:'draw',source:null,shared:null,busy:false,worker:null,result:null,runConfig:null,runs:[],loss:{},config:null,pending:null,dirty:false,backendInfo:null,suiteReports:[],scoreStale:false};
 let toastTimer,renderTimer,workerTimer,plotView=null,gesture=null;
 const snapshot=()=>({definition:clone(state.def),origin:clone(state.source)});
 const fmt=(v,d=3)=>Number.isFinite(v)?v.toFixed(d):'—',pct=v=>Number.isFinite(v)?(v*100).toFixed(1)+'%':'—';
 function toast(message){$('toast').textContent=message;$('toast').style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').style.display='none',5000);}
 function download(name,data,type='application/json'){const blob=data instanceof Blob?data:new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);}
 async function copy(text){try{await navigator.clipboard.writeText(text);toast('コピーしました。');}catch{toast('コピーできません。入力欄を選択してコピーしてください。');}}
+function invalidateScore(){if(state.result){state.scoreStale=true;syncScoreStale();}}
 function setDef(d,{history=true,controls=false}={}){
-  try{const clean=validateDefinition(d);if(history){state.history.push(snapshot());if(state.history.length>50)state.history.shift();state.future=[];}state.def=clean;state.dirty=true;if(controls)refreshControls();scheduleRender();}
+  try{const clean=validateDefinition(d);if(history){state.history.push(snapshot());if(state.history.length>50)state.history.shift();state.future=[];}state.def=clean;state.dirty=true;invalidateScore();if(controls)refreshControls();scheduleRender();}
   catch(e){toast(e.message);}
 }
 function scheduleRender(){clearTimeout(renderTimer);renderTimer=setTimeout(render,35);}
@@ -87,13 +89,16 @@ $('curve-canvas').addEventListener('pointermove',event=>{const p=pointerCoord(ev
 });
 function finishGesture(){if(!gesture)return;const g=gesture;gesture=null;
   if(g.points){try{if(g.points.length>512)throw new Error('制御点が512点を超えました。短いストロークで描き直してください。');let points=g.points;if(points.length<2)return;const direction=Math.sign(points.at(-1)[0]-points[0][0]);if(direction<0)points=[...points].reverse();const clean=[];for(const p of points){if(clean.length&&Math.abs(p[0]-clean.at(-1)[0])<1e-12&&Math.abs(p[1]-clean.at(-1)[1])<1e-12)continue;clean.push(p);}const d={schema:1,engine:'neurocurve-1',kind:'sketch',points:clean,domain:[clean[0][0],clean.at(-1)[0]]};validateDefinition(d);setDef(d,{controls:true});$('fit-note').textContent=`${clean.length}点をPCHIP補間。制御点位置では描画値と一致します（丸め誤差を除く）。`;}catch(e){toast(e.message);render();}}
-  else{state.history.push({definition:g.before,origin:clone(state.source)});state.future=[];state.dirty=true;refreshControls();render();}
+  else{state.history.push({definition:g.before,origin:clone(state.source)});state.future=[];state.dirty=true;invalidateScore();refreshControls();render();}
 }
 $('curve-canvas').addEventListener('pointerup',finishGesture);$('curve-canvas').addEventListener('pointercancel',()=>{if(gesture)state.def=gesture.before;gesture=null;render();});
 all('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));all('[data-mode]').forEach(b=>b.onclick=()=>mode(b.dataset.mode));
+$('hero-draw').onclick=()=>{tab('studio');mode('sketch');$('curve-canvas').scrollIntoView({behavior:'smooth',block:'center'});};
+$('hero-benchmark').onclick=()=>{tab('learning');$('learning-panel').scrollIntoView({behavior:'smooth',block:'start'});};
+$('clear-sketch').onclick=()=>{if(state.mode!=='sketch')return;const [min,max]=state.def.domain;setDef({schema:1,engine:'neurocurve-1',kind:'sketch',domain:[min,max],points:[[min,0],[max,0]]},{controls:true});toast('下書きの直線に戻しました。グラフ上に新しい線を描いてください。');};
 $('go-analysis').onclick=()=>{tab('analysis');$('analysis-panel').scrollIntoView({behavior:'smooth',block:'start'});};$('go-learning').onclick=()=>tab('learning');
 $('reset').onclick=()=>{state.mode='valleys';setDef(defaultDefinition(),{controls:true});state.source=null;state.shared=null;$('shared-banner').classList.add('hidden');refreshControls();};
-$('undo').onclick=()=>{if(!state.history.length)return;state.future.push(snapshot());const record=state.history.pop();state.def=record.definition;state.source=record.origin;state.mode=state.def.kind;refreshControls();render();};$('redo').onclick=()=>{if(!state.future.length)return;state.history.push(snapshot());const record=state.future.pop();state.def=record.definition;state.source=record.origin;state.mode=state.def.kind;refreshControls();render();};
+$('undo').onclick=()=>{if(!state.history.length)return;state.future.push(snapshot());const record=state.history.pop();state.def=record.definition;state.source=record.origin;state.mode=state.def.kind;state.dirty=true;invalidateScore();refreshControls();render();};$('redo').onclick=()=>{if(!state.future.length)return;state.history.push(snapshot());const record=state.future.pop();state.def=record.definition;state.source=record.origin;state.mode=state.def.kind;state.dirty=true;invalidateScore();refreshControls();render();};
 $('depth-square').onclick=()=>{const d=clone(state.def);d.params.depthPower=2;d.params.depthGrowth=1;d.params.depth=.02;setDef(d,{controls:true});toast('段番号の2乗で深さを増やしました。曲線全体の二乗ではありません。');};
 for(const [name,label]of Object.entries(PRESETS)){const b=document.createElement('button');b.textContent=label;b.onclick=()=>setDef({schema:1,engine:'neurocurve-1',kind:'preset',name,domain:[...state.def.domain]});$('preset-buttons').append(b);}
 $('apply-expression').onclick=()=>{const d={schema:1,engine:'neurocurve-1',kind:'expression',expression:$('expression-input').value,domain:[...state.def.domain]};try{validateDefinition(d);$('expression-error').textContent='';setDef(d);}catch(e){$('expression-error').textContent=e.message;}};
@@ -107,25 +112,76 @@ $('import-function').onchange=async event=>{const file=event.target.files[0];if(
 function drawLoss(){const canvas=$('loss-canvas'),box=canvasSize(canvas);if(!box)return;const {ctx,width:W,height:H}=box;ctx.clearRect(0,0,W,H);const tracks=Object.entries(state.loss);if(!tracks.length){ctx.fillStyle='#9aa9af';ctx.font='12px sans-serif';ctx.textAlign='center';ctx.fillText('実行すると、損失の推移を描画します。',W/2,H/2);return;}
   const values=tracks.flatMap(([,t])=>t.map(p=>Math.log10(Math.max(p.loss,1e-8)))).filter(Number.isFinite);let lo=Math.min(...values)-.1,hi=Math.max(...values)+.1,steps=(state.runConfig?.mode??$('benchmark-mode').value)==='full'?600:150;const X=x=>58+(W-88)*x/steps,Y=y=>H-34-(y-lo)/(hi-lo)*(H-65);ctx.font='10px ui-monospace,monospace';for(let i=0;i<=4;i++){const v=lo+(hi-lo)*i/4;ctx.strokeStyle='#e9eeef';ctx.beginPath();ctx.moveTo(58,Y(v));ctx.lineTo(W-30,Y(v));ctx.stroke();ctx.fillStyle='#8b9ca4';ctx.textAlign='right';ctx.fillText((10**v).toFixed(v< -1?3:2),48,Y(v)+3);}const colors={Custom:'#0c8576',ReLU:'#9babb2',Swish:'#887eaa',GELU:'#ba9662'};for(const [key,track]of tracks){ctx.strokeStyle=colors[key.split(':')[0]];ctx.lineWidth=key.startsWith('Custom')?2:1.3;ctx.beginPath();track.forEach((p,i)=>{const x=X(p.step),y=Y(Math.log10(Math.max(p.loss,1e-8)));i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.stroke();}ctx.fillStyle='#718892';ctx.textAlign='left';ctx.fillText('損失（対数軸）',58,15);ctx.textAlign='right';ctx.fillText('更新回数',W-30,H-9);
 }
-function renderResults(){const lower=(state.runConfig?.dataset??$('dataset').value)==='wave',summary=summarize(state.runs,lower),body=$('results-body');body.replaceChildren();$('metric-heading').textContent=lower?'RMSE / 中央値':'正解率 / 中央値';for(const g of summary.groups){const tr=document.createElement('tr');if(g.name==='Custom')tr.className='custom';const metric=v=>v===null?'—':lower?fmt(v,4):(v*100).toFixed(2)+'%';for(const text of [g.name,metric(g.median),g.n?`${metric(g.min)} – ${metric(g.max)}`:'—',g.elapsedMedianMs===null?'—':fmt(g.elapsedMedianMs/1000,2)+' s',state.runs.find(r=>r.name===g.name&&!r.failed)?.backend??'—',`${g.n} / ${g.failures}`]){const td=document.createElement('td');td.textContent=text;tr.append(td);}body.append(tr);}
+function renderResults(){const lower=DATASET_TASK[state.runConfig?.dataset??$('dataset').value]==='regression',summary=summarize(state.runs,lower),body=$('results-body');body.replaceChildren();$('metric-heading').textContent=lower?'RMSE / 中央値':'正解率 / 中央値';for(const g of summary.groups){const tr=document.createElement('tr');if(g.name==='Custom')tr.className='custom';const metric=v=>v===null?'—':lower?fmt(v,4):(v*100).toFixed(2)+'%';for(const text of [g.name,metric(g.median),g.n?`${metric(g.min)} – ${metric(g.max)}`:'—',g.elapsedMedianMs===null?'—':fmt(g.elapsedMedianMs/1000,2)+' s',state.runs.find(r=>r.name===g.name&&!r.failed)?.backend??'—',`${g.n} / ${g.failures}`]){const td=document.createElement('td');td.textContent=text;tr.append(td);}body.append(tr);}
   const paired=$('paired-results');paired.replaceChildren();for(const c of summary.comparisons){const p=document.createElement('p');p.textContent=`対 ${c.baseline}: シード対応平均差 ${c.meanDifference===null?'—':lower?fmt(c.meanDifference,5):fmt(c.meanDifference*100,3)+' ポイント'} (${c.pairs}ペア) / UNCERTAIN — 一般的な優位性は未検証`;paired.append(p);}
   $('run-diagnostics').textContent=JSON.stringify(state.runs.map(r=>({name:r.name,seed:r.seed,backend:r.backend,dtype:r.dtype,validation:r.validation,test:r.test,initialTrainLoss:r.initialTrainLoss,finalTrainLoss:r.finalTrainLoss,maxGradientNorm:r.maxGradientNorm,clippedSteps:r.clippedSteps,activationDiagnostics:r.activationDiagnostics,activationLut:r.activationLut,gradientAudit:r.gradientAudit,gpuSetupMs:r.gpuSetupMs,config:r.config,error:r.error})),null,2);
 }
-function finishWorker(){clearTimeout(workerTimer);$('workspace').inert=false;state.worker?.terminate();state.worker=null;state.busy=false;$('stop-training').disabled=true;$('dataset').disabled=false;$('benchmark-mode').disabled=false;$('compute-backend').disabled=false;$('start-training').disabled=!state.analysis.safe;}
+function syncScoreStale(){
+ if(state.scoreStale&&state.result?.kind==='suite'){
+   $('suite-status').textContent='曲線変更・再評価必要';
+   $('suite-credits').textContent='このスコアは変更前の関数で測定しました。新しい曲線を評価してください。';
+   $('export-scorecard').disabled=true;$('copy-score-summary').disabled=true;
+ }
+}
+function scopeChanged(){
+ const scope=$('evaluation-scope').value,selected=scope!=='single';
+ $('dataset').disabled=selected||state.busy;$('dataset').closest('label').classList.toggle('hidden',selected);
+ $('suite-overview').classList.toggle('hidden',!selected);
+ const total=selected?SUITES[scope].tasks.length:1,mult=$('benchmark-mode').value==='full'?5:1;
+ $('suite-budget-note').textContent=selected?`${SUITES[scope].name}を${total*4*mult}学習で比較。${mult}シード × ${mult===5?'600':'150'}更新。すべての課題が完了しないと総合点は出ません。`:'選択した1課題をReLU・Swish・GELUと比較。総合スコアはありません。';
+}
+function renderSuiteScore(){
+ const scope=state.runConfig?.scope??$('evaluation-scope').value;
+ if(scope==='single')return;
+ const score=scoreSuite(state.suiteReports,scope),table=$('suite-tasks');
+ table.replaceChildren();$('suite-score').textContent=score.overall===null?'—':score.overall.toFixed(2);
+ $('suite-status').textContent=score.complete?(score.status==='exploratory'?'探索結果 / 1シード':'複数シード・記述的評価'):`進行中または未完了 ${score.tasks.filter(Boolean).length}/${score.tasks.length}`;
+ $('suite-credits').textContent=score.complete?'基準50点：ReLU / Swish / GELUの同一条件での誤差中央値と比較。カテゴリー均等重み。一般的優位性の証明ではありません。':'未実行・失敗の課題は総合点に含めず、全課題成功まで総合点を表示しません。';
+ const categories=$('suite-categories');categories.replaceChildren();
+ for(const [id,value] of Object.entries(score.categories)){const row=document.createElement('div');row.className='category-row';const title=document.createElement('span');title.textContent=CATEGORY_LABEL[id];const bar=document.createElement('progress');bar.max=100;bar.value=value??0;bar.setAttribute('aria-label',CATEGORY_LABEL[id]+' 相対点');const num=document.createElement('strong');num.textContent=value===null?'—':value.toFixed(2);row.append(title,bar,num);categories.append(row);}
+ for(const name of SUITES[scope].tasks){
+  const task=score.tasks.find(t=>t?.id===name),report=state.suiteReports.find(r=>r.dataset===name),tr=document.createElement('tr');
+  if(task?.score>50)tr.classList.add('better');
+  const format=(n,type)=>Number.isFinite(n)?type==='classification'?(n*100).toFixed(2)+'%':n.toFixed(4):'—';
+  const col=[TASK_LABEL[name],DATASET_TASK[name]==='classification'?'分類':'回帰',task?format(task.customMedian,task.type):'—',task?format(task.baselineMedian,task.type):'—',task?task.score.toFixed(2):'—',task?'完了':report?'失敗 / データを確認':'未実行'];
+  for(const value of col){const td=document.createElement('td');td.textContent=value;tr.append(td);}table.append(tr);
+ }
+ const ready=score.complete&&!state.scoreStale&&!!state.result?.score?.complete;
+ $('export-scorecard').disabled=!ready;$('copy-score-summary').disabled=!ready;
+ syncScoreStale();
+}
+function scoreCardText(){
+ const r=state.result,score=r?.score;
+ if(!r||r.kind!=='suite'||!score?.complete||state.scoreStale)return '';
+ return `NeuroCurve / ${score.suiteName} 相対スコア: ${score.overall}/100 (基準50)\n`+score.tasks.map(t=>`${t.label}: ${t.score}/100`).join('\n')+`\n${r.mode==='quick'?'1シード探索':'5シード記述評価'} / ${r.backendSelection?.effective??'unknown'} / 測定結果は自己申告・独立検証なし。`;
+}
+$('copy-score-summary').onclick=()=>{const value=scoreCardText();if(value)copy(value);};
+$('export-scorecard').onclick=()=>{
+ const r=state.result,score=r?.score;if(!score?.complete||state.scoreStale)return;
+ const xml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
+ const rows=score.tasks.map((t,i)=>`<text x="56" y="${225+28*i}" font-size="16" fill="#e3efed">${xml(t.label)}<tspan x="650" text-anchor="end" fill="#91f2bd">${t.score.toFixed(2)}</tspan></text>`).join('');
+ const height=270+score.tasks.length*28;
+ const svg=`<svg xmlns="http://www.w3.org/2000/svg" width="720" height="${height}" viewBox="0 0 720 ${height}"><rect width="100%" height="100%" fill="#10282e"/><text x="56" y="65" fill="#9ed3c4" font-size="16" font-family="sans-serif">NEUROCURVE · CHALLENGE REPORT</text><text x="56" y="145" fill="white" font-size="68" font-weight="bold" font-family="sans-serif">${score.overall.toFixed(2)}<tspan font-size="24" fill="#9ed3c4"> / 100</tspan></text><text x="56" y="178" fill="#b0c4c4" font-size="16">${xml(score.suiteName)} · 基準50点</text>${rows}<text x="56" y="${height-35}" fill="#aec0c0" font-size="12">Local self-reported result · Not independently verified · No general superiority claim</text></svg>`;
+ download('NeuroCurve-challenge-score.svg',svg,'image/svg+xml');
+};
+function finishWorker(){clearTimeout(workerTimer);$('workspace').inert=false;state.worker?.terminate();state.worker=null;state.busy=false;$('stop-training').disabled=true;$('dataset').disabled=false;$('benchmark-mode').disabled=false;$('compute-backend').disabled=false;$('evaluation-scope').disabled=false;scopeChanged();$('start-training').disabled=!state.analysis.safe;}
 $('start-training').onclick=()=>{
   if(state.busy||!state.analysis.safe)return;if(!window.Worker)return toast('このブラウザはWorkerに対応していません。');
-  state.runConfig={dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value};state.backendInfo=null;$('effective-backend').textContent='GPU検査待ち / CPUも利用可';$('compute-backend').disabled=true;state.busy=true;state.runs=[];state.loss={};state.result=null;$('export-results').disabled=true;$('start-training').disabled=true;$('stop-training').disabled=false;$('dataset').disabled=true;$('benchmark-mode').disabled=true;$('training-progress').value=0;$('training-status').textContent='初期化中 / この端末で実行';$('paired-results').replaceChildren();$('results-body').replaceChildren();drawLoss();
+  state.runConfig={scope:$('evaluation-scope').value,dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value};state.suiteReports=[];state.scoreStale=false;renderSuiteScore();state.backendInfo=null;$('effective-backend').textContent='GPU検査待ち / CPUも利用可';$('compute-backend').disabled=true;$('evaluation-scope').disabled=true;state.busy=true;state.runs=[];state.loss={};state.result=null;$('export-results').disabled=true;$('start-training').disabled=true;$('stop-training').disabled=false;$('dataset').disabled=true;$('benchmark-mode').disabled=true;$('training-progress').value=0;$('training-status').textContent='初期化中 / この端末で実行';$('paired-results').replaceChildren();$('results-body').replaceChildren();drawLoss();
   let worker;try{worker=new Worker('/worker.js',{type:'module'});}catch{ $('training-status').textContent='起動失敗: Workerを開始できません。';finishWorker();return;}state.worker=worker;$('workspace').inert=true;workerTimer=setTimeout(()=>{$('training-status').textContent='起動失敗: Workerの応答がありません。';finishWorker();},15000);
   worker.onmessage=({data:e})=>{clearTimeout(workerTimer);if(e.type==='probe-start'){$('training-status').textContent='WebGPUの実演算を検査中';$('training-detail').textContent='GPUコンピュート検証。停止ボタンで中断できます。';}
     else if(e.type==='backend'){state.backendInfo=e;$('effective-backend').textContent=e.effective==='webgpu-compute'?'WebGPU · Float32':'CPU / JavaScript · Float64';$('training-status').textContent=e.effective==='webgpu-compute'?'WebGPUで学習を開始':'CPUで学習を開始';$('training-detail').textContent=e.reason;if(e.effective==='native-js-cpu'&&e.selected==='auto')toast('WebGPUは利用できませんでした。CPUで実行します。 '+e.reason);}
+    else if(e.type==='suite-task-start'){state.runConfig.dataset=e.dataset;state.runs=[];state.loss={};drawLoss();$('training-status').textContent=`${TASK_LABEL[e.dataset]} / ${e.taskIndex+1} / ${e.taskCount} 課題`;renderSuiteScore();}
+    else if(e.type==='suite-task-end'){state.suiteReports.push(e.report);renderSuiteScore();$('training-progress').value=(e.taskIndex+1)/e.taskCount;}
     else if(e.type==='self-test'){$('training-detail').textContent=`数学自己検査: ${e.result.checked}点 / 最大微分誤差 ${e.result.maxError.toExponential(2)}`;}else if(e.type==='run-start'){$('training-status').textContent=`${e.name} を学習中`;$('training-detail').textContent=`seed ${e.seed} · ${e.index+1}/${e.total} 実行`;state.loss[`${e.name}:${e.seed}`]=[];}
-    else if(e.type==='progress'){state.loss[`${e.name}:${e.seed}`].push({step:e.step,loss:e.loss});$('training-progress').value=(e.index+e.step/e.steps)/e.total;$('training-detail').textContent=`seed ${e.seed} · ${e.step}/${e.steps} 更新 · ${e.index+1}/${e.total} 実行`;drawLoss();}
+    else if(e.type==='progress'){state.loss[`${e.name}:${e.seed}`].push({step:e.step,loss:e.loss});$('training-progress').value=e.taskCount?(e.taskIndex+(e.index+e.step/e.steps)/e.total)/e.taskCount:(e.index+e.step/e.steps)/e.total;$('training-detail').textContent=`seed ${e.seed} · ${e.step}/${e.steps} 更新 · ${e.index+1}/${e.total} 実行`;drawLoss();}
     else if(e.type==='run-end'){state.runs.push(e.run);renderResults();}
-    else if(e.type==='complete'){state.result=e.result;state.result.environment={userAgent:navigator.userAgent,logicalProcessors:navigator.hardwareConcurrency??null,backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown',clock:'not fixed / not available from browser'};$('training-status').textContent=`評価終了 / ${state.runs.filter(r=>!r.failed).length} 成功・${state.runs.filter(r=>r.failed).length} 失敗`; $('training-detail').textContent='結果はこのタブ内のみ。サーバーに送信していません。';$('training-progress').value=1;$('export-results').disabled=false;finishWorker();renderResults();}
+    else if(e.type==='complete'){state.result=e.result;state.result.environment={userAgent:navigator.userAgent,logicalProcessors:navigator.hardwareConcurrency??null,backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown',clock:'not fixed / not available from browser'};if(state.result.kind==='suite'){state.suiteReports=state.result.reports;renderSuiteScore();$('training-status').textContent=state.result.score.complete?'全課題の評価が完了':'全課題を実行・一部失敗';}else{$('training-status').textContent=`評価終了 / ${state.runs.filter(r=>!r.failed).length} 成功・${state.runs.filter(r=>r.failed).length} 失敗`;} $('training-detail').textContent='結果はこのタブ内のみ。サーバーに送信していません。';$('training-progress').value=1;$('export-results').disabled=false;finishWorker();renderResults();}
     else if(e.type==='error'){$('training-status').textContent='実行停止: '+e.message;finishWorker();}};
   worker.onerror=e=>{$('training-status').textContent='実行エラー。ブラウザまたは共通データの取得状況を確認してください。';finishWorker();};
-  worker.postMessage({type:'start',definition:clone(state.def),dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value});
+  worker.postMessage({type:'start',definition:clone(state.def),dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value,scope:$('evaluation-scope').value});
 };
+$('evaluation-scope').onchange=scopeChanged;$('benchmark-mode').onchange=scopeChanged;scopeChanged();
 $('stop-training').onclick=()=>{finishWorker();$('training-status').textContent='学習を中断しました';$('training-detail').textContent='Workerを終了しました。GPU側の計算停止・解放はブラウザが管理します。';};
 $('export-results').onclick=()=>{if(state.result)download('NeuroCurve-experiment.json',JSON.stringify(state.result,null,2));};
 const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
