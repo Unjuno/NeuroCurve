@@ -5,14 +5,15 @@ import {createHash} from 'node:crypto';
 const publicDir=new URL('../public/',import.meta.url);
 const read=name=>readFileSync(new URL(name,publicDir),'utf8');
 const digits=read('data/digits-v1.json');
+const packaged=Object.fromEntries(['digits','iris','wine','breast'].map(id=>[id,JSON.parse(read('data/'+id+'-v1.json'))]));
 const meta=JSON.parse(read('data/digits-meta.json'));
 if(createHash('sha256').update(digits).digest('hex')!==meta.sha256)throw new Error('Digits integrity mismatch');
-const order=['core/expression.js','core/activation.js','core/data.js','core/training.js','core/webgpu.js','core/export.js'];
+const order=['core/expression.js','core/activation.js','core/data.js','core/suite.js','core/training.js','core/webgpu.js','core/export.js'];
 function rewriteImports(text,name){return text.replace(/import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?/g,(_,names,dep)=>'const {'+names+'}=globalThis.NC_BUNDLE['+JSON.stringify(posix.normalize(posix.join(posix.dirname(name),dep)))+'];');}
 function modules({withDigits=false}={}){
  let text='globalThis.NC_BUNDLE={};\n';
  for(const name of order){let source=read(name);const exported=[...source.matchAll(/export\s+(?:async\s+)?(?:function|class|const|let)\s+(\w+)/g)].map(m=>m[1]);
-  if(name==='core/data.js')source=source.replace(/export async function loadDataset\(name\)\{[\s\S]*$/,withDigits?'export async function loadDataset(name){return makeDataset(name,name===\'digits\'?'+digits.trim()+':null);}\n':"export async function loadDataset(name){if(name==='digits')throw new Error('Use packaged Worker for Digits');return makeDataset(name);}\n");
+  if(name==='core/data.js')source=source.replace(/export async function loadDataset\(name\)\{[\s\S]*$/,withDigits?'export async function loadDataset(name){const files='+JSON.stringify(packaged)+';return makeDataset(name,files[name]??null); }\n':"export async function loadDataset(name){return makeDataset(name); }\n");
   source=rewriteImports(source,name).replace(/\bexport\s+/g,'');
   text+='globalThis.NC_BUNDLE['+JSON.stringify(name)+']=(()=>{\n'+source+'\nreturn {'+exported.join(',')+'};})();\n';
  }

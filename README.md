@@ -2,9 +2,26 @@
 
 **手描きの活性化関数を、解析し、自分の端末で学習評価する。**
 
-v0.9.0 GPU対応候補版。Apache-2.0。ログインなし、下書き自動保存なし、公開一覧なし。
+v1.0.0 マルチタスクスコア・デザイン改善の開発候補版。Apache-2.0。ログインなし、下書き自動保存なし、公開一覧なし。
 
 > **状態**: 実行可能なアプリケーションとテストを同梱しています。公開ホスティングへのデプロイ、実機Safari/Firefox検証、本番CDNと復旧運用の検証は未完了です。GitHubの既存リポジトリは変更していません。
+
+
+## v1.0 マルチタスク評価（開発候補版）
+
+新しい「Challenge Score」画面では、既存3課題を含む10課題から固定スイートを選べます。
+基本6課題：Two Moons / Circles / Digits / Iris / Multi-frequency / Chirp。
+拡張10課題：さらにSpiral / XOR / Wine / Breast Cancer Wisconsin (Diagnostic)。
+
+ゲームスコアは各タスクのReLU・Swish・GELUの誤差中央値を50点とする、端末内の相対スコアです。
+分類は誤分類率 `1 - Accuracy`、回帰は `RMSE` を使用し、`50 + 50*(referenceError - customError)/(referenceError + customError + 1e-6)` で0–100点に変換します。
+各タスクは同一シードで比較し、分野（非線形/画像/表データ/信号）を均等重みで集約します。未実行・失敗があると総合点は表示されません。
+高速試験の1シードは探索的結果であり、5シードの結果も科学的優位性を証明しません。
+標準データの由来とライセンスは `THIRD_PARTY_NOTICES.md` に記載しています。
+
+匿名共有URLは**ChatGPT Sitesの現行静的版では使えません**。スコアをSVGカードまたはテキストで端末から明示的に書き出せますが、ブラウザの計算結果を自動でサーバーへ送りません。数値は自己申告であり、検証済みランキングではありません。共有URLを有効化するにはSitesのAPI/永続DBへの移植と本番試験が必要です。
+
+実行検査：`npm test`, `npm run check`, `npm run build:sites-static`, `npm run benchmark:suite`。
 
 ## すぐ動かす
 
