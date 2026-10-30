@@ -74,6 +74,8 @@ npm run check           # 構文 / 禁止API検査
 npm run test:sites      # 共有・期限・R2障害・取り消しAPIの専用テスト
 ```
 
+SitesのVinext Worker構成に `public/`、`sites/worker.js`、D1マイグレーションを統合してビルドした後、`scripts/test-sites-runtime.mjs` をその構成の `scripts/` に置き、`node scripts/test-sites-runtime.mjs` を実行できる。MiniflareのローカルD1/R2とビルド済みWorkerで投稿、削除、期限切れ、復元、通報を検査する。これは本番Sitesのストレージやブラウザでの確認に代わらない。
+
 Workでの追加必須テスト:
 
 1. Sites開発版で実D1に投稿し、別ブラウザでも読めるか（閲覧URLと削除キーの分離）。
