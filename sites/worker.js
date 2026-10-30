@@ -140,6 +140,14 @@ export async function handleSitesRequest(req,env,{now=Date.now}={}){
     if(!env.ADMIN_TOKEN||!sameHex(req.headers.get('Authorization')??'',`Bearer ${env.ADMIN_TOKEN}`))response=unavailable();
     else response=json(200,{purged:await store.cleanup()});
    }
+   else if(path==='/api/admin/reports'&&req.method==='GET'){
+    if(typeof env.ADMIN_TOKEN!=='string'||env.ADMIN_TOKEN.length<32||!sameHex(req.headers.get('Authorization')??'',`Bearer ${env.ADMIN_TOKEN}`))response=unavailable();
+    else {const rows=await env.DB.prepare('SELECT id,share_id,reason,created FROM reports ORDER BY created DESC LIMIT 100').all();response=json(200,{reports:rows.results||[]});}
+   }
+   else if(path==='/api/admin/revoke'&&req.method==='POST'){
+    if(typeof env.ADMIN_TOKEN!=='string'||env.ADMIN_TOKEN.length<32||!sameHex(req.headers.get('Authorization')??'',`Bearer ${env.ADMIN_TOKEN}`))response=unavailable();
+    else {const input=await bodyJSON(req);if(!ID.test(input?.shareId??''))throw new HttpError(400,'共有IDの形式が不正です。');const row=await env.DB.prepare('SELECT id FROM shares WHERE id=?').bind(input.shareId).first();if(!row)response=unavailable();else {await store.revoke(input.shareId);response=new Response(null,{status:204});}}
+   }
    else{
     const api=/^\/api\/shares\/([a-f0-9]{32})$/.exec(path);
     const shared=/^\/f\/([a-f0-9]{32})(\/og\.png)?$/.exec(path);

@@ -1,0 +1,43 @@
+/** Integration test of the packaged Worker with local D1, R2 and static assets. */
+import assert from 'node:assert/strict';
+import {createRequire} from 'node:module';
+import {readFile} from 'node:fs/promises';
+import {randomBytes,createHash} from 'node:crypto';
+import {fileURLToPath} from 'node:url';
+import {defaultDefinition} from '../public/core/activation.js';
+const require=createRequire(import.meta.url);
+const {Miniflare}=createRequire(require.resolve('wrangler/package.json'))('miniflare');
+const path=relative=>fileURLToPath(new URL(relative,import.meta.url));
+const admin='local-test-admin-secret-at-least-32-characters';
+const mf=new Miniflare({modules:true,scriptPath:path('../dist/server/index.js'),modulesRoot:path('../dist/server/'),compatibilityDate:'2026-05-15',compatibilityFlags:['nodejs_compat'],d1Databases:['DB'],r2Buckets:['REVOCATIONS'],bindings:{RATE_SALT:'local-test-secret-at-least-32-characters',ADMIN_TOKEN:admin},assets:{directory:path('../dist/client/'),binding:'ASSETS',routerConfig:{has_user_worker:true,invoke_user_worker_ahead_of_assets:true}}});
+const base='https://local.test';
+const request=(url,options={})=>mf.dispatchFetch(base+url,{...options,headers:{Origin:base,'Content-Type':'application/json',...options.headers}});
+const makePost=()=>{const secret=randomBytes(32).toString('hex');return {secret,body:{shareId:randomBytes(16).toString('hex'),requestId:randomBytes(16).toString('hex'),deleteHash:createHash('sha256').update(secret).digest('hex'),definition:defaultDefinition(),title:'<test>',description:'',days:7,consent:true,termsVersion:'2026-10-v1',reuse:'local-only'}}};
+const post=body=>request('/api/shares',{method:'POST',body:JSON.stringify(body)});
+const paths=id=>['/api/shares/'+id,'/f/'+id,'/f/'+id+'/og.png'];
+try {
+ const db=await mf.getD1Database('DB');
+ const sql=await readFile(path('../drizzle/0000_wet_ken_ellis.sql'),'utf8');
+ for(const statement of sql.split('--> statement-breakpoint').map(x=>x.trim()).filter(Boolean))await db.prepare(statement).run();
+ const item=makePost(), id=item.body.shareId;
+ assert.equal((await post(item.body)).status,201);
+ assert.equal((await post(item.body)).status,200);
+ const snapshot=await db.prepare('SELECT * FROM shares WHERE id=?').bind(id).first();
+ for(const route of paths(id)) assert.equal((await request(route)).status,200,route);
+ const html=await (await request('/f/'+id)).text();assert.ok(html.includes('&lt;test&gt;'));assert.ok(!html.includes(item.secret));
+ assert.equal((await request('/api/shares/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+randomBytes(32).toString('hex')}})).status,404);
+ assert.equal((await request('/api/shares/'+id,{method:'DELETE',headers:{Authorization:'Bearer '+item.secret}})).status,204);
+ for(const route of paths(id)) assert.equal((await request(route)).status,404,route);
+ await db.prepare('INSERT INTO shares (id,request_id,request_hash,delete_hash,payload,created,expires) VALUES (?,?,?,?,?,?,?)').bind(snapshot.id,snapshot.request_id,snapshot.request_hash,snapshot.delete_hash,snapshot.payload,snapshot.created,snapshot.expires).run();
+ assert.equal((await request('/api/shares/'+id)).status,404,'restored content remains revoked');
+ const expired=makePost();assert.equal((await post(expired.body)).status,201);
+ await db.prepare('UPDATE shares SET expires=? WHERE id=?').bind(0,expired.body.shareId).run();
+ for(const route of paths(expired.body.shareId))assert.equal((await request(route)).status,404,route);
+ const reported=makePost();assert.equal((await post(reported.body)).status,201);
+ assert.equal((await request('/api/reports',{method:'POST',body:JSON.stringify({shareId:reported.body.shareId,reason:'Test report'})})).status,202);
+ assert.equal((await request('/api/admin/reports')).status,404);
+ const auth={Authorization:'Bearer '+admin};const reports=await request('/api/admin/reports',{headers:auth});assert.equal(reports.status,200);assert.equal((await reports.json()).reports.length,1);
+ assert.equal((await request('/api/admin/revoke',{method:'POST',headers:auth,body:JSON.stringify({shareId:reported.body.shareId})})).status,204);
+ assert.equal((await request('/api/shares/'+reported.body.shareId)).status,404);
+ console.log('PASS: local Worker + D1/R2 create, retry, HTML/API/image, wrong key, delete, restore, expiry, report and operator revocation');
+} finally {await mf.dispose()}
