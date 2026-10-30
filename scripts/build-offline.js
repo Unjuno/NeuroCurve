@@ -8,7 +8,7 @@ const digits=read('data/digits-v1.json');
 const packaged=Object.fromEntries(['digits','iris','wine','breast'].map(id=>[id,JSON.parse(read('data/'+id+'-v1.json'))]));
 const meta=JSON.parse(read('data/digits-meta.json'));
 if(createHash('sha256').update(digits).digest('hex')!==meta.sha256)throw new Error('Digits integrity mismatch');
-const order=['core/expression.js','core/activation.js','core/data.js','core/suite.js','core/training.js','core/webgpu.js','core/export.js'];
+const order=['core/expression.js','core/activation.js','core/sketch-stroke.js','core/data.js','core/suite.js','core/training.js','core/webgpu.js','core/export.js'];
 function rewriteImports(text,name){return text.replace(/import\s*\{([^}]+)\}\s*from\s*['"]([^'"]+)['"];?/g,(_,names,dep)=>'const {'+names+'}=globalThis.NC_BUNDLE['+JSON.stringify(posix.normalize(posix.join(posix.dirname(name),dep)))+'];');}
 function modules({withDigits=false}={}){
  let text='globalThis.NC_BUNDLE={};\n';

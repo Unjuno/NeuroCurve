@@ -17,3 +17,41 @@ main{max-width:1660px}.intro{margin-top:26px;margin-bottom:24px;padding:33px 37p
 @media(max-width:720px){.topbar{min-height:68px;height:auto;padding:14px 16px}.topbar .brand{font-size:20px}.intro{margin-top:16px;margin-bottom:18px;padding:25px 20px;border-radius:16px}.intro h1{font-size:25px;letter-spacing:-1px}.intro-hint{font-size:11px}.suite-intro{margin:15px 14px 0;padding:17px;gap:8px}.suite-intro h3{font-size:15px}.suite-intro p:not(.eyebrow){font-size:11px}.suite-badge{width:64px;min-width:64px;padding-left:10px}.suite-badge span{font-size:32px}.suite-badge small{font-size:7px;line-height:1.4}.learning-setup{display:flex;flex-direction:column;gap:14px}.learning-setup>label{width:100%}.learning-actions{width:100%;justify-content:stretch}.learning-actions button{flex:1}.suite-budget-note{margin:0 18px 16px}.scoreboard-body{display:flex;flex-direction:column;gap:30px;padding:23px 20px}.score-value strong{font-size:62px}.category-row{grid-template-columns:105px 1fr 45px}.suite-task-table{margin:10px}.suite-task-table th,.suite-task-table td{font-size:10px;padding:10px 9px}.score-footnote{margin:15px 16px 24px;font-size:10px}}
 .hero-actions{display:flex;align-items:center;flex-wrap:wrap;gap:10px;margin-top:21px}.hero-actions button{font-weight:700;font-size:12px;border-radius:10px;padding:11px 15px;cursor:pointer}.hero-cta{background:#93eed0;color:#113b39;border:1px solid #93eed0}.hero-cta:hover{background:#c0ffe9}.hero-cta span{margin-left:14px}.hero-secondary{background:#ffffff13;border:1px solid #ffffff57;color:#e0fff5}.hero-secondary:hover{background:#ffffff24}
 @media(max-width:720px){.hero-actions{margin-top:18px;gap:9px}.hero-actions button{font-size:11px;padding:10px 12px}}
+
+/* v1.1: task-first result comprehension, Desmos-style direct manipulation,
+   and a readable mobile summary without weakening the scientific table. */
+.score-balance{display:inline-flex;align-items:center;margin:0 0 8px!important;padding:7px 11px;border-radius:9px;background:#ffffff16;color:#d7f4e8!important;font-size:12px!important;font-weight:600;line-height:1.55}
+.category-scale,.task-score-meter{display:block;position:relative;min-width:0}
+.category-scale::after,.task-score-meter::after{content:"";position:absolute;left:50%;top:-3px;bottom:-3px;width:2px;background:#fff;border:1px solid #1a4543;opacity:.95;pointer-events:none;border-radius:2px}
+.category-scale progress,.task-score-meter progress{width:100%;display:block;accent-color:#80e8c5}
+.category-scale progress{height:8px}
+.task-card-grid,.mobile-table-hint{display:none}
+.result-context{margin:3px 24px 15px;padding:10px 14px;border-left:3px solid #75b8a6;border-radius:6px;background:#edf7f3;color:#355a55;font-size:12px;line-height:1.65}
+.suite-task-table:focus-visible{outline:3px solid #4da993;outline-offset:3px}
+.score-actions .secondary{min-height:42px}
+@media(max-width:720px){
+ .task-card-grid{display:grid;grid-template-columns:1fr;gap:11px;margin:17px 16px 0}
+ .task-score-card{background:#f7fbfa;border:1px solid #dce8e6;border-radius:12px;padding:13px 14px;min-width:0}
+ .task-card-heading{display:flex;align-items:baseline;justify-content:space-between;gap:8px;font-size:13px;color:#1a4048}
+ .task-card-heading strong:first-child{overflow-wrap:anywhere}
+ .task-card-number{font-variant-numeric:tabular-nums;color:#385867;white-space:nowrap;font-size:12px}
+ .task-card-number.above-baseline{color:#087969}
+ .task-score-meter{margin:11px 0 8px}
+ .task-score-meter progress{height:10px;border:0}
+ .task-score-meter::after{background:#16393f;border-color:#fff}
+ .task-score-card p{font-size:12px;margin:0;color:#486670;line-height:1.6}
+ .task-score-card small{font-size:11px;color:#648089;display:block;margin-top:6px}
+ .mobile-table-hint{display:block;color:#536c73;font-size:11px;line-height:1.65;margin:15px 16px 4px}
+ .suite-task-table{margin:7px 12px 15px;max-height:190px}
+ .suite-task-table table{min-width:660px}
+ .suite-task-table th:first-child,.suite-task-table td:first-child{position:sticky;left:0;z-index:1;background:#f4f9f6;box-shadow:2px 0 5px #25474412}
+ .suite-task-table td:first-child{background:#fff}
+ .score-actions button{min-height:44px;font-size:12px}
+ .score-balance,.result-context{font-size:12px!important}
+ .result-context{margin:9px 15px 12px}
+ .score-footnote{font-size:12px}
+ #curve-canvas{min-height:230px}
+}
+@media(prefers-reduced-motion:reduce){button,*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
+
+.draw-status{font-size:12px;line-height:1.55;color:#166c5f;background:#eaf7f2;border:1px solid #c3e6db;border-radius:9px;padding:9px 11px;margin:9px 0 11px}
