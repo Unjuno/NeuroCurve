@@ -33,7 +33,8 @@ function mockD1() {
           };
         },
         first: async () => statement.get() || null,
-        run: async () => { const result = statement.run(); return {success:true,meta:{changes:result.changes}}; }
+        run: async () => { const result = statement.run(); return {success:true,meta:{changes:result.changes}}; },
+        all: async () => ({results: statement.all()})
       };
     }
   };
@@ -58,6 +59,23 @@ function harness() {
   return {env,db,revocations,req,clock:t=>{now=t},now};
 }
 const post=(req,body)=>req('/api/shares',{method:'POST',body:JSON.stringify(body)});
+
+test('operator can review reports and revoke only with the configured secret',async()=>{
+  const {req,env,db}=harness(),{body}=createPost();
+  env.ADMIN_TOKEN='test-admin-secret-with-at-least-32-characters';
+  assert.equal((await post(req,body)).status,201);
+  assert.equal((await req('/api/reports',{method:'POST',body:JSON.stringify({shareId:body.shareId,reason:'Test report'})})).status,202);
+  const auth={Authorization:'Bearer '+env.ADMIN_TOKEN};
+  assert.equal((await req('/api/admin/reports')).status,404);
+  assert.equal((await req('/api/admin/revoke',{method:'POST',body:JSON.stringify({shareId:body.shareId})})).status,404);
+  const result=await req('/api/admin/reports',{headers:auth});
+  assert.equal(result.status,200);const reports=await result.json();assert.equal(reports.reports.length,1);assert.equal(reports.reports[0].share_id,body.shareId);
+  const saved=db.db.prepare('SELECT * FROM shares WHERE id=?').get(body.shareId);
+  assert.equal((await req('/api/admin/revoke',{method:'POST',headers:auth,body:JSON.stringify({shareId:body.shareId})})).status,204);
+  assert.equal((await req('/api/shares/'+body.shareId)).status,404);
+  db.db.prepare('INSERT INTO shares (id,request_id,request_hash,delete_hash,payload,created,expires) VALUES (?,?,?,?,?,?,?)').run(...Object.values(saved));
+  assert.equal((await req('/api/shares/'+body.shareId)).status,404);
+});
 
 test('D1 + R2: consent and input validation prevent anonymous spam', async()=>{
   const {req}=harness(),{body}=createPost();

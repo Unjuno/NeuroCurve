@@ -59,6 +59,10 @@ R2に失効記録を書けなければDELETE成功を返さない。R2読み込�
 - `GET /f/:id/og.png` — OG用PNG。現在はサイト共通画像のみ
 - `POST /api/reports` — 通報の受付
 - `POST /api/maintenance` — 管理トークンによる期限切れ一括掃除。自動実行はWork上で別途設定要。
+- `GET /api/admin/reports` — 管理用トークンで最新100件の通報を取得。
+- `POST /api/admin/revoke` — 管理用トークンと `{"shareId":"..."}` で投稿を失効。独立したR2台帳への記録に成功してからD1の本文を削除する。
+
+管理APIは `Authorization: Bearer <ADMIN_TOKEN>` を使う。`ADMIN_TOKEN` は32文字以上の秘密値としてSitesの環境変数に設定し、リポジトリ・URL・ログに記載しない。変更系のリクエストにはサイト自身の `Origin` が必要。管理APIはユーザーの削除キー紛失を回復する仕組みではない。本番での権限、監査、通報監視、定期掃除は別途検証・設定が必要。
 
 いずれも、共有時のHTTPレスポンスを`no-store`とし、期限直前・直後・削除直後に本体が返らないことを必ず実測する。
 
