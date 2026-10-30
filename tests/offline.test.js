@@ -3,6 +3,9 @@ test('single-file build has no external script imports and parses',()=>{
  execFileSync(process.execPath,['scripts/build-offline.js']);const html=readFileSync('dist/NeuroCurve-local.html','utf8');
  assert.ok(!/<script[^>]*\bsrc=/.test(html));assert.ok(!/<link[^>]*\bhref=/.test(html));
  const script=html.match(/<script>([\s\S]*)<\/script>/)[1];new vm.Script(script);assert.ok(script.includes('NC_OFFLINE_MODE=true'));
+ assert.match(html,/<button disabled id="manage-button"/);assert.match(html,/<button disabled id="report-button"/);
+ const policy=html.match(/<details id="offline-policy"[\s\S]*?<\/details>/)[0];
+ assert.match(policy,/URLでの投稿・削除・通報は使えません/);assert.doesNotMatch(policy,/本番公開前|1時間ごとに整理|バックアップを設定する場合/);
 });
 test('packaged offline Worker trains on embedded Digits, without network',async()=>{
  const source=readFileSync('dist/worker-validation.js','utf8');
