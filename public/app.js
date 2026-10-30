@@ -249,7 +249,7 @@ window.addEventListener('beforeunload',e=>{if(state.dirty||state.busy||state.pen
 window.addEventListener('resize',()=>{drawPlot();drawLoss();});
 buildParameters();buildIndividual();refreshControls();render();
 async function initialize(){
-  if(window.NC_OFFLINE_MODE){state.config={sharingEnabled:false};$('share-button').disabled=true;$('share-button').textContent='端末内版';return;}
+  if(window.NC_OFFLINE_MODE){state.config={sharingEnabled:false};$('share-button').disabled=true;$('share-button').textContent='URL共有は準備中';return;}
   try{state.config=await api('/api/config');}catch{state.config={sharingEnabled:false};}
   const match=/^\/f\/([a-f0-9]{32})$/.exec(location.pathname);
   if(match){try{const shared=await api('/api/shares/'+match[1]);state.shared=shared;state.source={shareId:shared.shareId,contentHash:shared.contentHash,reuse:shared.reuse};state.def=validateDefinition(shared.definition);state.mode=state.def.kind;$('shared-title').textContent=shared.title||'共有された活性化関数';$('shared-details').textContent=(shared.description?shared.description+' / ':'')+(shared.expiresAt?'期限 '+new Date(shared.expiresAt).toLocaleString():'期限設定なし');$('shared-banner').classList.remove('hidden');$('share-button').disabled=true;refreshControls();render();}catch(e){toast(e.message);}}
