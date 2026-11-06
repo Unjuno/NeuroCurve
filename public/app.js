@@ -1,7 +1,7 @@
 import {defaultDefinition,validateDefinition,compileDefinition,analyze,PRESETS,PARAMS,samplePoints,inspectSketch} from './core/activation.js';
 import {exportPython,functionCSV,curveSVG} from './core/export.js';
 import {summarize} from './core/training.js';
-import {initialWorkflow,transitionWorkflow,isEvaluationBusy,isCurrentResult,maySubmitShare,workflowLabel} from './core/workflow-machine.js';
+import {initialWorkflow,transitionWorkflow,isEvaluationBusy,isCurrentResult,maySubmitShare,mayRecoverShare,workflowLabel} from './core/workflow-machine.js';
 import {normalizeStrokePoints} from './core/sketch-stroke.js';
 import {SUITES,scoreSuite,TASK_LABEL,CATEGORY_LABEL,DATASET_TASK} from './core/suite.js';
 const $=id=>document.getElementById(id),all=s=>[...document.querySelectorAll(s)],clone=x=>structuredClone(x);
@@ -18,7 +18,10 @@ function renderWorkflowStatus(){
  if(!$('workflow-status'))return;
  $('workflow-document').textContent=`曲線の編集履歴 ${workflow.documentRevision} 回`;
  $('workflow-evaluation').textContent=workflowLabel(workflow);
- $('workflow-sharing').textContent=workflow.sharing.enabled?'期限付きURL共有に対応':'URL共有は未接続（ファイル保存のみ）';
+ $('workflow-sharing').textContent=workflow.sharing.phase==='posting'?'共有リクエストを送信中':
+ workflow.sharing.phase==='error'?'投稿結果未確認・削除キー保管':
+ workflow.sharing.phase==='published'?'共有URLを発行済み':
+ workflow.sharing.enabled?'期限付きURL共有に対応':'URL共有は未接続（ファイル保存のみ）';
  const phase=workflow.evaluation.phase;
  $('workflow-status').textContent=phase==='stale'?'曲線または評価条件が変わりました。現在の結果を見るには再評価してください。':
   isEvaluationBusy(workflow)?'この端末で学習しています。実行中に曲線を変更すると結果は履歴扱いになります。':
@@ -40,6 +43,14 @@ function invalidateScore(){
  dispatchWorkflow({type:'DOCUMENT_CHANGED'});
  if(state.pending&&!state.pending.success&&workflow.sharing.phase==='idle'){
   state.pending=null;$('delete-secret').value='';if($('share-dialog').open)$('share-dialog').close();
+ }else if(state.pending&&!state.pending.success&&state.pending.body){
+  // An ambiguously accepted submission retains its original deletion receipt.
+  $('share-recovery-confirm').checked=false;
+  if(workflow.sharing.phase==='posting')
+   $('share-status').textContent='曲線を編集しました。送信中の投稿は編集前の曲線です。結果の確認まで削除キーを保管してください。';
+  else if(workflow.sharing.phase==='error')
+   $('share-status').textContent='旧版の投稿結果を確認できていません。現在の曲線は送信しません。削除キーを保管してください。';
+  consentChanged();
  }
  if(state.result){state.scoreStale=true;renderSuiteScore();syncScoreStale();}
 }
@@ -252,25 +263,76 @@ const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
 const randomHex=n=>hex(crypto.getRandomValues(new Uint8Array(n)));
 const digest=async s=>hex(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))));
 async function api(path,options={}){const r=await fetch(path,{...options,headers:{'Content-Type':'application/json',...options.headers},cache:'no-store'});let b;try{b=await r.json();}catch{b={};}if(!r.ok)throw new Error(b.error??'接続に失敗しました。');return b;}
-function consentChanged(){$('publish-share').disabled=!$('share-consent').checked||!$('key-saved').checked||!state.pending||state.pending.success||!maySubmitShare(workflow);}
-$('share-consent').onchange=consentChanged;$('key-saved').onchange=consentChanged;
+function consentChanged(){
+ const p=state.pending,older=!!p?.body&&mayRecoverShare(workflow);
+ $('share-recovery').classList.toggle('hidden',!older);
+ if(!older)$('share-recovery-confirm').checked=false;
+ $('share-discard').classList.toggle('hidden',workflow.sharing.phase!=='error');
+ $('publish-share').textContent=older?'編集前の曲線を再確認する':workflow.sharing.phase==='error'?'同じ投稿を再確認する':'同意して投稿する';
+ const allowed=maySubmitShare(workflow)||(older&&$('share-recovery-confirm').checked);
+ $('publish-share').disabled=!p?.deleteHash||!!p.success||!$('share-consent').checked||!$('key-saved').checked||!allowed;
+}
+$('share-consent').onchange=consentChanged;$('key-saved').onchange=consentChanged;$('share-recovery-confirm').onchange=consentChanged;
 $('share-button').onclick=async()=>{
   if(state.source)return toast('この関数は他者の投稿由来です。ローカルで編集・評価できますが、この版では再投稿しません。');
   if(!state.config?.sharingEnabled)return toast('この配信環境では共有APIを利用できません。ローカル版サーバーを起動すると利用できます。');
   try{
-    if(!state.pending||state.pending.success){const secret=randomHex(32);state.pending={secret,shareId:randomHex(16),requestId:randomHex(16),definition:clone(state.def),deleteHash:await digest(secret),body:null,success:false};$('delete-secret').value=secret;$('delete-secret').type='password';$('share-title').value='';$('share-description').value='';$('share-days').value='7';$('share-consent').checked=false;$('key-saved').checked=false;$('share-success').classList.add('hidden');$('share-status').textContent='';for(const id of ['share-title','share-description','share-days'])$(id).disabled=false;}
-    dispatchWorkflow({type:'SHARE_PREPARE',requestId:state.pending.requestId});consentChanged();$('share-dialog').showModal();
-  }catch{toast('安全な乱数を利用できません。HTTPSまたはlocalhostで開いてください。');}
+    if(!state.pending||state.pending.success){
+      const secret=randomHex(32);
+      const p={secret,shareId:randomHex(16),requestId:randomHex(16),definition:clone(state.def),deleteHash:null,body:null,success:false};
+      // Register the exact revision before asynchronous hashing begins.
+      if(!dispatchWorkflow({type:'SHARE_PREPARE',requestId:p.requestId}))return;
+      state.pending=p;
+      $('delete-secret').value=secret;$('delete-secret').type='password';
+      $('share-title').value='';$('share-description').value='';$('share-days').value='7';
+      $('share-consent').checked=false;$('key-saved').checked=false;$('share-recovery-confirm').checked=false;
+      $('share-success').classList.add('hidden');$('share-status').textContent='';
+      for(const id of ['share-title','share-description','share-days'])$(id).disabled=false;
+      p.deleteHash=await digest(secret);
+      // Edits during hashing invalidate the new draft and its pending deletion key.
+      if(state.pending!==p||workflow.sharing.phase!=='prepared'||workflow.sharing.requestId!==p.requestId)return;
+    }else if(!state.pending.deleteHash){toast('削除キーを準備中です。');return;
+    }else if(workflow.sharing.phase==='posting'){toast('投稿結果を確認中です。');return;
+    }else if(!['prepared','error'].includes(workflow.sharing.phase)){toast('共有状態を再確認してください。');return;}
+    // Re-opening a potentially accepted request never rebinds it to the current curve.
+    consentChanged();if(!$('share-dialog').open)$('share-dialog').showModal();
+  }catch{
+    if(state.pending&&!state.pending.deleteHash&&workflow.sharing.phase==='prepared'){
+      dispatchWorkflow({type:'SHARE_RESET'});state.pending=null;$('delete-secret').value='';
+    }
+    toast('安全な乱数またはハッシュ計算を利用できません。HTTPSまたはlocalhostで開いてください。');
+  }
 };
 $('copy-secret').onclick=()=>copy($('delete-secret').value);$('reveal-secret').onclick=()=>{$('delete-secret').type=$('delete-secret').type==='password'?'text':'password';};
 $('download-key').onclick=()=>{if(!state.pending)return;download('NeuroCurve-delete-receipt.json',JSON.stringify({shareUrl:(state.config?.origin??location.origin)+'/f/'+state.pending.shareId,deleteSecret:state.pending.secret,requestId:state.pending.requestId,warning:'秘密キーです。第三者に渡さないでください。'},null,2));};
 $('publish-share').onclick=async()=>{
   if(!$('share-consent').checked||!$('key-saved').checked||!state.pending)return;const p=state.pending;
-  if(!dispatchWorkflow({type:'SHARE_SUBMIT',requestId:p.requestId,consent:true,keySaved:true}))return;
+  const recovering=!!p.body&&mayRecoverShare(workflow);
+  const event=recovering?{type:'SHARE_RECOVER',requestId:p.requestId,consent:true,keySaved:true,originalConfirmed:$('share-recovery-confirm').checked}:
+   {type:'SHARE_SUBMIT',requestId:p.requestId,consent:true,keySaved:true};
+  if(!dispatchWorkflow(event))return;
   if(!p.body)p.body={shareId:p.shareId,requestId:p.requestId,deleteHash:p.deleteHash,definition:p.definition,title:$('share-title').value,description:$('share-description').value,days:$('share-days').value==='unlimited'?null:Number($('share-days').value),consent:true,termsVersion:'2026-10-v1',reuse:'local-only'};
   $('publish-share').disabled=true;for(const id of ['share-title','share-description','share-days'])$(id).disabled=true;$('share-status').textContent='投稿を確認中…';
-  try{const r=await api('/api/shares',{method:'POST',body:JSON.stringify(p.body)});p.success=true;dispatchWorkflow({type:'SHARE_SUCCESS',requestId:p.requestId});$('share-url').value=r.url;$('share-expiry').textContent=r.expiresAt?'公開期限: '+new Date(r.expiresAt).toLocaleString()+' / UTC '+r.expiresAt:'期限設定なし。サービスの永続を保証しません。';$('share-success').classList.remove('hidden');$('share-status').textContent='関数定義のみ投稿しました。学習結果は送信していません。';}
-  catch(e){dispatchWorkflow({type:'SHARE_FAILURE',requestId:p.requestId,error:e.message});$('share-status').textContent=e.message+' 同じキー・同じ内容で再試行できます。このタブを閉じないでください。';$('publish-share').disabled=false;}
+  try{const r=await api('/api/shares',{method:'POST',body:JSON.stringify(p.body)});p.success=true;dispatchWorkflow({type:'SHARE_SUCCESS',requestId:p.requestId});$('share-url').value=r.url;$('share-expiry').textContent=r.expiresAt?'公開期限: '+new Date(r.expiresAt).toLocaleString()+' / UTC '+r.expiresAt:'期限設定なし。サービスの永続を保証しません。';$('share-success').classList.remove('hidden');$('share-status').textContent=workflow.sharing.preparedRevision!==workflow.documentRevision?
+     '編集前の曲線を共有しました。現在の編集内容とは異なります。学習結果は送信していません。':
+     '関数定義のみ投稿しました。学習結果は送信していません。';consentChanged();}
+  catch(e){
+    dispatchWorkflow({type:'SHARE_FAILURE',requestId:p.requestId,error:e.message});
+    $('share-recovery-confirm').checked=false;
+    $('share-status').textContent=workflow.sharing.preparedRevision!==workflow.documentRevision?
+      e.message+' 投稿結果は不明です。編集前の曲線を同じ投稿ID・定義で再確認できます。削除キーを保管してください。':
+      e.message+' 投稿が成立している可能性があります。同じ内容と投稿IDで再確認できます。削除キーを保管してください。';
+    consentChanged();
+   }
+};
+$('share-discard').onclick=()=>{
+ if(workflow.sharing.phase!=='error'||!state.pending?.body)return;
+ if(!$('key-saved').checked){toast('削除キーを保管してから操作してください。');return;}
+ if(!window.confirm('通信失敗でも以前の投稿が受理されている場合があります。削除キーの控えを保管したうえで、古い投稿の確認を終了しますか？'))return;
+ if(!dispatchWorkflow({type:'SHARE_RESET'}))return;
+ state.pending=null;$('delete-secret').value='';$('share-recovery-confirm').checked=false;
+ $('share-dialog').close();
+ toast('旧投稿の確認を終了しました。新しい投稿は別のIDと削除キーで行います。');
 };
 $('copy-share').onclick=()=>copy($('share-url').value);$('native-share').onclick=async()=>{if(!navigator.share)return copy($('share-url').value);try{await navigator.share({title:'NeuroCurve',url:$('share-url').value});}catch(e){if(e.name!=='AbortError')toast('共有できません。URLコピーをご利用ください。');}};
 all('.close-dialog').forEach(b=>b.onclick=()=>b.closest('dialog').close());

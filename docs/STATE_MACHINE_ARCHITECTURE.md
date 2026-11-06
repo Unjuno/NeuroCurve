@@ -51,3 +51,11 @@ References: W3C WAI-ARIA 1.2 §5.3.5; MDN Using Web Workers; D. Harel, “Statec
 ### Partial benchmark handling
 
 When a Worker returns normally but one of the required benchmark tasks has failed, the evaluation region transitions to `partial`, **not** `complete`. Task-level successful measurements remain visible; the overall Challenge Score and shareable scorecard are not certified. A later edited curve or changed selection is still marked outdated by the existing score validity guards.
+
+### Network ambiguity: immutable retry and recovery
+
+An HTTP POST may have been accepted even if the browser never received the response. Accordingly, `error` following `posting` is **not** an unsubmitted draft: document edits may not destroy its request ID or deletion receipt, and reopening the dialog cannot issue `SHARE_PREPARE` again. Retries use the exact immutable request body and stable server-idempotency key.
+
+When the current curve has a different document revision than the previously submitted snapshot, ordinary `SHARE_SUBMIT` is forbidden. The old request can only be retried with the distinct `SHARE_RECOVER` event and the user's explicit confirmation that they are resubmitting the **old** curve, alongside original sharing consent and deletion-key custody confirmation. Every new curve edit clears that additional checkbox, not the key. The UI reports if a successful post represents an older snapshot.
+
+The user may abandon an ambiguous POST only after affirming the deletion receipt is saved and accepting a warning that an earlier request may have been accepted. No client-side drafts, secrets or training results are automatically persisted or uploaded.

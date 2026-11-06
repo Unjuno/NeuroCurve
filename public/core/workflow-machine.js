@@ -27,6 +27,10 @@ export function maySubmitShare(state){
  const s=state.sharing;
  return s.enabled && (s.phase==='prepared'||s.phase==='error') && s.preparedRevision===state.documentRevision && !!s.requestId;
 }
+export function mayRecoverShare(state){
+ const s=state.sharing;
+ return s.enabled && s.phase==='error' && !!s.requestId && Number.isInteger(s.preparedRevision) && s.preparedRevision!==state.documentRevision;
+}
 export function workflowLabel(state){
  return ({idle:'未評価',preparing:'学習の準備中',running:'学習中',complete:'評価完了',partial:'一部課題失敗・総合点未確定',stale:'条件変更・再評価が必要',error:'学習失敗',cancelled:'学習を中断'})[state.evaluation.phase];
 }
@@ -37,7 +41,7 @@ export function transitionWorkflow(state,event){
  switch(event.type){
   case 'DOCUMENT_CHANGED':{
    const evaluation=e.phase==='complete'?{...e,phase:'stale'}:e;
-   const sharing=(s.phase==='prepared'||s.phase==='error')?{...s,phase:s.enabled?'idle':'unavailable',requestId:null,preparedRevision:null,error:null}:s;
+   const sharing=s.phase==='prepared'?{...s,phase:s.enabled?'idle':'unavailable',requestId:null,preparedRevision:null,error:null}:s;
    return {...state,documentRevision:rev+1,evaluation,sharing};
   }
   case 'SELECTION_CHANGED':{
@@ -75,11 +79,18 @@ export function transitionWorkflow(state,event){
    return {...state,sharing:{enabled,phase:enabled?'idle':'unavailable',requestId:null,preparedRevision:null,error:null}};
   }
   case 'SHARE_PREPARE':{
-   if(!s.enabled||!['idle','error','published'].includes(s.phase)||typeof event.requestId!=='string'||!event.requestId)return state;
+   if(!s.enabled||!['idle','published'].includes(s.phase)||typeof event.requestId!=='string'||!event.requestId)return state;
    return {...state,sharing:{...s,phase:'prepared',requestId:event.requestId,preparedRevision:rev,error:null}};
   }
   case 'SHARE_SUBMIT':{
    if(!maySubmitShare(state)||event.requestId!==s.requestId||event.consent!==true||event.keySaved!==true)return state;
+   return {...state,sharing:{...s,phase:'posting',error:null}};
+  }
+  case 'SHARE_RECOVER':{
+   // Explicitly re-send an old, immutable request; it must never be rebound
+   // to a newer local curve revision after an ambiguous network failure.
+   if(!mayRecoverShare(state)||event.requestId!==s.requestId||event.consent!==true||
+      event.keySaved!==true||event.originalConfirmed!==true)return state;
    return {...state,sharing:{...s,phase:'posting',error:null}};
   }
   case 'SHARE_SUCCESS':{
@@ -91,7 +102,7 @@ export function transitionWorkflow(state,event){
    return {...state,sharing:{...s,phase:'error',error:String(event.error??'unknown error')}};
   }
   case 'SHARE_RESET':{
-   if(s.phase==='unavailable'||s.phase==='idle')return state;
+   if(s.phase==='unavailable'||s.phase==='idle'||s.phase==='posting')return state;
    return {...state,sharing:{...s,phase:s.enabled?'idle':'unavailable',requestId:null,preparedRevision:null,error:null}};
   }
   default:return state;
