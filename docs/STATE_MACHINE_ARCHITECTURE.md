@@ -47,3 +47,7 @@ An older result may remain in experiment JSON but MUST NOT appear as a valid cur
 The workflow ribbon describes the *actual reducer phase*, not decorative completion. It differentiates untested, preparing, running, complete, stale, failed and cancelled states; displays current URL-sharing availability; and uses a polite status live region and visible keyboard focus, not color alone. The main curve editor and multi-task score remain in place.
 
 References: W3C WAI-ARIA 1.2 §5.3.5; MDN Using Web Workers; D. Harel, “Statecharts: A Visual Formalism for Complex Systems” (1987), doi:10.1016/0167-6423(87)90035-9.
+
+### Partial benchmark handling
+
+When a Worker returns normally but one of the required benchmark tasks has failed, the evaluation region transitions to `partial`, **not** `complete`. Task-level successful measurements remain visible; the overall Challenge Score and shareable scorecard are not certified. A later edited curve or changed selection is still marked outdated by the existing score validity guards.

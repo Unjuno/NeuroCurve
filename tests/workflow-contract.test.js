@@ -25,3 +25,7 @@ test('workflow state is visible and accessible without relying on color alone',(
   assert.match(html,new RegExp('id="'+id+'"'));
  assert.match(html,/role="status"/);assert.match(style,/\.workflow-ribbon/);assert.match(style,/:focus-visible/);
 });
+
+test('incomplete multi-task suite is not rendered as a certified completion',()=>{
+ assert.match(app,/RUN_PARTIAL/);assert.match(app,/score\.complete/);
+});

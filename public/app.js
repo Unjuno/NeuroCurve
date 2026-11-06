@@ -24,6 +24,7 @@ function renderWorkflowStatus(){
   isEvaluationBusy(workflow)?'この端末で学習しています。実行中に曲線を変更すると結果は履歴扱いになります。':
   phase==='complete'?'評価完了。タスク別の実測値と基準関数との差を確認できます。':
   phase==='error'?'学習が停止しました。実行デバイスや関数の安全性を確認してください。':
+  phase==='partial'?'一部の課題が失敗しました。総合スコアは確定しません。タスク別結果と失敗理由を確認してください。':
   workflow.sharing.enabled?'曲線を作成し、学習評価した後に必要なら共有できます。':'手描き・解析・評価は端末内で実行します。URL共有は接続待ちです。';
 }
 function dispatchWorkflow(event){
@@ -165,7 +166,7 @@ function syncScoreStale(){
 }
 function scopeChanged(){
  dispatchWorkflow({type:'SELECTION_CHANGED',key:evaluationKey()});
- if(state.result&&!isCurrentResult(workflow))state.scoreStale=true;
+ if(state.result&&workflow.evaluation.phase==='stale')state.scoreStale=true;
  const scope=$('evaluation-scope').value,selected=scope!=='single';
  $('dataset').disabled=selected||state.busy;$('dataset').closest('label').classList.toggle('hidden',selected);
  $('suite-overview').classList.toggle('hidden',!selected);
@@ -239,7 +240,7 @@ $('start-training').onclick=()=>{
     else if(e.type==='self-test'){$('training-detail').textContent=`数学自己検査: ${e.result.checked}点 / 最大微分誤差 ${e.result.maxError.toExponential(2)}`;}else if(e.type==='run-start'){$('training-status').textContent=`${e.name} を学習中`;$('training-detail').textContent=`seed ${e.seed} · ${e.index+1}/${e.total} 実行`;state.loss[`${e.name}:${e.seed}`]=[];}
     else if(e.type==='progress'){state.loss[`${e.name}:${e.seed}`].push({step:e.step,loss:e.loss});$('training-progress').value=e.taskCount?(e.taskIndex+(e.index+e.step/e.steps)/e.total)/e.taskCount:(e.index+e.step/e.steps)/e.total;$('training-detail').textContent=`seed ${e.seed} · ${e.step}/${e.steps} 更新 · ${e.index+1}/${e.total} 実行`;drawLoss();}
     else if(e.type==='run-end'){state.runs.push(e.run);renderResults();}
-    else if(e.type==='complete'){dispatchWorkflow({type:'RUN_SUCCESS',runId});state.result=e.result;state.scoreStale=!isCurrentResult(workflow);state.result.environment={userAgent:navigator.userAgent,logicalProcessors:navigator.hardwareConcurrency??null,backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown',clock:'not fixed / not available from browser'};if(state.result.kind==='suite'){state.suiteReports=state.result.reports;renderSuiteScore();$('training-status').textContent=state.result.score.complete?'全課題の評価が完了':'全課題を実行・一部失敗';}else{$('training-status').textContent=`評価終了 / ${state.runs.filter(r=>!r.failed).length} 成功・${state.runs.filter(r=>r.failed).length} 失敗`;} $('training-detail').textContent='結果はこのタブ内のみ。サーバーに送信していません。';$('training-progress').value=1;$('export-results').disabled=false;finishWorker();renderResults();}
+    else if(e.type==='complete'){dispatchWorkflow({type:e.result?.kind==='suite'&&!e.result.score?.complete?'RUN_PARTIAL':'RUN_SUCCESS',runId,error:'一部課題が失敗'});state.result=e.result;state.scoreStale=workflow.evaluation.phase==='stale';state.result.environment={userAgent:navigator.userAgent,logicalProcessors:navigator.hardwareConcurrency??null,backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown',clock:'not fixed / not available from browser'};if(state.result.kind==='suite'){state.suiteReports=state.result.reports;renderSuiteScore();$('training-status').textContent=state.result.score.complete?'全課題の評価が完了':'全課題を実行・一部失敗';}else{$('training-status').textContent=`評価終了 / ${state.runs.filter(r=>!r.failed).length} 成功・${state.runs.filter(r=>r.failed).length} 失敗`;} $('training-detail').textContent='結果はこのタブ内のみ。サーバーに送信していません。';$('training-progress').value=1;$('export-results').disabled=false;finishWorker();renderResults();}
     else if(e.type==='error'){dispatchWorkflow({type:'RUN_FAILURE',runId,error:e.message});$('training-status').textContent='実行停止: '+e.message;finishWorker();}};
   worker.onerror=e=>{if(state.worker!==worker||workflow.evaluation.runId!==runId)return;dispatchWorkflow({type:'RUN_FAILURE',runId,error:e?.message??'Worker error'});$('training-status').textContent='実行エラー。ブラウザまたは共通データの取得状況を確認してください。';finishWorker();};
   worker.postMessage({type:'start',definition:clone(state.def),dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value,scope:$('evaluation-scope').value});

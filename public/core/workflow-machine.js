@@ -28,7 +28,7 @@ export function maySubmitShare(state){
  return s.enabled && (s.phase==='prepared'||s.phase==='error') && s.preparedRevision===state.documentRevision && !!s.requestId;
 }
 export function workflowLabel(state){
- return ({idle:'未評価',preparing:'学習の準備中',running:'学習中',complete:'評価完了',stale:'条件変更・再評価が必要',error:'学習失敗',cancelled:'学習を中断'})[state.evaluation.phase];
+ return ({idle:'未評価',preparing:'学習の準備中',running:'学習中',complete:'評価完了',partial:'一部課題失敗・総合点未確定',stale:'条件変更・再評価が必要',error:'学習失敗',cancelled:'学習を中断'})[state.evaluation.phase];
 }
 
 export function transitionWorkflow(state,event){
@@ -56,6 +56,10 @@ export function transitionWorkflow(state,event){
    if(!isEvaluationBusy(state)||event.runId!==e.runId)return state;
    const current=rev===e.runRevision&&e.selection===e.runSelection;
    return {...state,evaluation:{...e,phase:current?'complete':'stale',completedRevision:e.runRevision,completedSelection:e.runSelection,error:null}};
+  }
+  case 'RUN_PARTIAL':{
+   if(!isEvaluationBusy(state)||event.runId!==e.runId)return state;
+   return {...state,evaluation:{...e,phase:'partial',error:String(event.error??'incomplete benchmark')}};
   }
   case 'RUN_FAILURE':{
    if(!isEvaluationBusy(state)||event.runId!==e.runId)return state;

@@ -88,3 +88,11 @@ test('status label differentiates stale, failure, running and idle for UI',()=>{
  state=send(state,'RUN_FAILURE',{runId:state.evaluation.runId,error:'GPU'});
  assert.match(workflowLabel(state),/失敗/);
 });
+
+test('partial suite is not a certified score even when the Worker finishes normally',()=>{
+ let state=started();const id=state.evaluation.runId;
+ state=send(state,'RUN_PARTIAL',{runId:id,error:'one dataset failed'});
+ assert.equal(state.evaluation.phase,'partial');assert.equal(isCurrentResult(state),false);
+ assert.equal(isEvaluationBusy(state),false);assert.match(workflowLabel(state),/一部/);
+ assert.equal(send(state,'RUN_SUCCESS',{runId:id}),state);
+});
