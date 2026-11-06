@@ -96,3 +96,58 @@ test('partial suite is not a certified score even when the Worker finishes norma
  assert.equal(isEvaluationBusy(state),false);assert.match(workflowLabel(state),/一部/);
  assert.equal(send(state,'RUN_SUCCESS',{runId:id}),state);
 });
+
+test('communication failure after editing preserves the submitted snapshot identity',()=>{
+ let s=send(initialWorkflow(),'SHARING_AVAILABLE',{enabled:true});
+ s=send(s,'SHARE_PREPARE',{requestId:'original'});
+ const revision=s.sharing.preparedRevision;
+ s=send(s,'SHARE_SUBMIT',{requestId:'original',consent:true,keySaved:true});
+ s=send(s,'DOCUMENT_CHANGED');
+ s=send(s,'SHARE_FAILURE',{requestId:'original',error:'response lost'});
+ assert.equal(s.sharing.phase,'error');
+ assert.equal(s.sharing.requestId,'original');
+ assert.equal(s.sharing.preparedRevision,revision);
+ // Re-opening the dialog must never rebind an old payload to today's curve.
+ assert.equal(send(s,'SHARE_PREPARE',{requestId:'original'}),s);
+ assert.equal(send(s,'SHARE_SUBMIT',{requestId:'original',consent:true,keySaved:true}),s);
+ assert.equal(send(s,'SHARE_RECOVER',{requestId:'original',consent:true,keySaved:true,originalConfirmed:false}),s);
+ const recovered=send(s,'SHARE_RECOVER',{requestId:'original',consent:true,keySaved:true,originalConfirmed:true});
+ assert.equal(recovered.sharing.phase,'posting');
+ assert.equal(recovered.sharing.preparedRevision,revision);
+ assert.equal(recovered.sharing.requestId,'original');
+});
+test('failure after a posted attempt survives further edits to preserve deletion-key recovery',()=>{
+ let s=send(initialWorkflow(),'SHARING_AVAILABLE',{enabled:true});
+ s=send(s,'SHARE_PREPARE',{requestId:'maybe-posted'});
+ s=send(s,'SHARE_SUBMIT',{requestId:'maybe-posted',consent:true,keySaved:true});
+ s=send(s,'SHARE_FAILURE',{requestId:'maybe-posted',error:'timeout'});
+ s=send(s,'DOCUMENT_CHANGED');
+ s=send(s,'DOCUMENT_CHANGED');
+ assert.equal(s.sharing.phase,'error');
+ assert.equal(s.sharing.requestId,'maybe-posted');
+ assert.equal(s.sharing.preparedRevision,0);
+});
+test('failed submitted request cannot be replaced with a new ID without an explicit reset',()=>{
+ let s=send(initialWorkflow(),'SHARING_AVAILABLE',{enabled:true});
+ s=send(s,'SHARE_PREPARE',{requestId:'first'});
+ s=send(s,'SHARE_SUBMIT',{requestId:'first',consent:true,keySaved:true});
+ s=send(s,'SHARE_FAILURE',{requestId:'first',error:'network'});
+ assert.equal(send(s,'SHARE_PREPARE',{requestId:'second'}),s);
+ assert.equal(send(s,'SHARE_RECOVER',{requestId:'first',consent:true,keySaved:true,originalConfirmed:true}),s);
+ const reset=send(s,'SHARE_RESET');
+ assert.equal(reset.sharing.phase,'idle');
+ assert.equal(send(reset,'SHARE_PREPARE',{requestId:'second'}).sharing.requestId,'second');
+});
+test('old-share recovery rejects the wrong request ID and missing consent or receipt',()=>{
+ let s=send(initialWorkflow(),'SHARING_AVAILABLE',{enabled:true});
+ s=send(s,'SHARE_PREPARE',{requestId:'first'});
+ s=send(s,'SHARE_SUBMIT',{requestId:'first',consent:true,keySaved:true});
+ s=send(s,'DOCUMENT_CHANGED');
+ s=send(s,'SHARE_FAILURE',{requestId:'first',error:'connection'});
+ for(const input of [
+  {requestId:'forged',consent:true,keySaved:true,originalConfirmed:true},
+  {requestId:'first',consent:false,keySaved:true,originalConfirmed:true},
+  {requestId:'first',consent:true,keySaved:false,originalConfirmed:true},
+  {requestId:'first',consent:true,keySaved:true,originalConfirmed:false}
+ ])assert.equal(send(s,'SHARE_RECOVER',input),s);
+});

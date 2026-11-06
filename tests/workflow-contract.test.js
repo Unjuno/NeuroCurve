@@ -29,3 +29,11 @@ test('workflow state is visible and accessible without relying on color alone',(
 test('incomplete multi-task suite is not rendered as a certified completion',()=>{
  assert.match(app,/RUN_PARTIAL/);assert.match(app,/score\.complete/);
 });
+
+test('the recovery UI must explicitly identify the old snapshot and require opt-in',()=>{
+ assert.match(html,/id="share-recovery-confirm"/);
+ assert.match(html,/id="share-recovery"/);
+ assert.match(app,/SHARE_RECOVER/);
+ assert.match(app,/originalConfirmed/);
+ assert.match(app,/preparedRevision/);
+});
