@@ -6,6 +6,11 @@
 <main id="main">
 <div id="shared-banner" class="notice hidden" role="status"><div><strong id="shared-title"></strong><p id="shared-details"></p><p>共有された関数です。編集・再評価はこの端末内のみ。元の投稿は変わりません。</p></div><button id="shared-edit" class="secondary">コピーして編集</button></div>
 <section class="intro"><div><p class="eyebrow">ACTIVATION FUNCTION LAB <span>v1.0 candidate</span></p><h1>描く。調べる。学習で確かめる。</h1><p class="lead">関数のかたちと、学習への影響を分けて観察する。あなたの仮説を、一本の曲線から。<strong class="intro-hint">分類・画像・表データ・回帰を横断して評価。</strong></p><div class="hero-actions"><button id="hero-draw" class="hero-cta">手描きで作る <span aria-hidden="true">→</span></button><button id="hero-benchmark" class="hero-secondary">マルチタスク評価を見る</button></div></div><div class="intro-tag"><span>01 / DESIGN</span><span>02 / ANALYZE</span><span>03 / TEST</span><span>04 / SHARE</span></div></section>
+<section class="workflow-ribbon" aria-label="操作と評価の状態">
+ <div class="workflow-ribbon-title"><span class="workflow-kicker">WORKFLOW</span><strong>いまの状態</strong></div>
+ <dl class="workflow-facts"><div><dt>編集</dt><dd id="workflow-document">曲線を準備中</dd></div><div><dt>評価</dt><dd id="workflow-evaluation">未評価</dd></div><div><dt>共有</dt><dd id="workflow-sharing">接続確認中</dd></div></dl>
+ <p id="workflow-status" role="status" aria-live="polite" aria-atomic="true">曲線を編集したら学習評価へ進めます。</p>
+</section>
 <div class="workspace" id="workspace">
 <aside class="panel controls" aria-label="関数を設計"><div class="panel-head"><span class="step">01</span><h2>関数をつくる</h2><button id="reset" class="icon-button" aria-label="初期設定に戻す">↺</button></div>
 <div class="mode-grid" role="group" aria-label="作成方法"><button data-mode="valleys" class="mode active">多段の谷</button><button data-mode="sketch" class="mode">手描き</button><button data-mode="expression" class="mode">数式</button><button data-mode="preset" class="mode">標準関数</button></div>

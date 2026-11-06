@@ -55,3 +55,12 @@ main{max-width:1660px}.intro{margin-top:26px;margin-bottom:24px;padding:33px 37p
 @media(prefers-reduced-motion:reduce){button,*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
 
 .draw-status{font-size:12px;line-height:1.55;color:#166c5f;background:#eaf7f2;border:1px solid #c3e6db;border-radius:9px;padding:9px 11px;margin:9px 0 11px}
+
+/* Workflow phase is an actual result validity indicator, not a decorative stepper. */
+.workflow-ribbon{display:grid;grid-template-columns:minmax(160px,0.6fr) minmax(360px,2fr);gap:10px 24px;align-items:center;margin:12px 0 20px;padding:14px 18px;border:1px solid var(--line);border-left:4px solid var(--accent);border-radius:var(--radius);background:var(--paper);box-shadow:0 4px 18px rgba(14,43,48,.04)}
+.workflow-ribbon-title{display:flex;flex-direction:column;gap:2px;font-size:13px;line-height:1.45}.workflow-kicker{font-size:10px;letter-spacing:.14em;font-weight:800;color:var(--accent)}
+.workflow-facts{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin:0}.workflow-facts>div{min-width:0}.workflow-facts dt{font-size:11px;font-weight:700;color:var(--muted);margin-bottom:4px}.workflow-facts dd{margin:0;font-size:12px;font-weight:700;overflow-wrap:anywhere}
+#workflow-status{grid-column:1/-1;margin:0;color:var(--muted);font-size:12px;line-height:1.55;border-top:1px solid var(--line);padding-top:9px}
+:focus-visible{outline:3px solid #18998e;outline-offset:3px;scroll-margin:16px}
+@media(max-width:850px){.workflow-ribbon{grid-template-columns:1fr}.workflow-facts{gap:10px}}
+@media(max-width:420px){.workflow-ribbon{padding:12px}.workflow-facts{grid-template-columns:1fr}.workflow-facts>div{display:flex;justify-content:space-between;gap:10px;border-bottom:1px solid var(--line);padding-bottom:6px}.workflow-facts dt{margin:0}.workflow-facts dd{text-align:right}}
