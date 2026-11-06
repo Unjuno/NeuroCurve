@@ -1,17 +1,59 @@
 import {defaultDefinition,validateDefinition,compileDefinition,analyze,PRESETS,PARAMS,samplePoints,inspectSketch} from './core/activation.js';
 import {exportPython,functionCSV,curveSVG} from './core/export.js';
 import {summarize} from './core/training.js';
+import {initialWorkflow,transitionWorkflow,isEvaluationBusy,isCurrentResult,maySubmitShare,mayRecoverShare,workflowLabel} from './core/workflow-machine.js';
 import {normalizeStrokePoints} from './core/sketch-stroke.js';
 import {SUITES,scoreSuite,TASK_LABEL,CATEGORY_LABEL,DATASET_TASK} from './core/suite.js';
 const $=id=>document.getElementById(id),all=s=>[...document.querySelectorAll(s)],clone=x=>structuredClone(x);
 const state={def:defaultDefinition(),analysis:null,mode:'valleys',tab:'studio',history:[],future:[],comparison:null,derivative:false,drawTool:'draw',source:null,shared:null,busy:false,worker:null,result:null,runConfig:null,runs:[],loss:{},config:null,pending:null,dirty:false,backendInfo:null,suiteReports:[],scoreStale:false};
 let toastTimer,renderTimer,workerTimer,plotView=null,gesture=null;
 const snapshot=()=>({definition:clone(state.def),origin:clone(state.source)});
+// Reducer is the source of truth for phase, run identity and revision validity.
+let workflow=initialWorkflow();
+function evaluationKey(){
+ const scope=$('evaluation-scope').value;
+ return JSON.stringify({scope,dataset:scope==='single'?$('dataset').value:null,mode:$('benchmark-mode').value,backend:$('compute-backend').value});
+}
+function renderWorkflowStatus(){
+ if(!$('workflow-status'))return;
+ $('workflow-document').textContent=`曲線の編集履歴 ${workflow.documentRevision} 回`;
+ $('workflow-evaluation').textContent=workflowLabel(workflow);
+ $('workflow-sharing').textContent=workflow.sharing.phase==='posting'?'共有リクエストを送信中':
+ workflow.sharing.phase==='error'?'投稿結果未確認・削除キー保管':
+ workflow.sharing.phase==='published'?'共有URLを発行済み':
+ workflow.sharing.enabled?'期限付きURL共有に対応':'URL共有は未接続（ファイル保存のみ）';
+ const phase=workflow.evaluation.phase;
+ $('workflow-status').textContent=phase==='stale'?'曲線または評価条件が変わりました。現在の結果を見るには再評価してください。':
+  isEvaluationBusy(workflow)?'この端末で学習しています。実行中に曲線を変更すると結果は履歴扱いになります。':
+  phase==='complete'?'評価完了。タスク別の実測値と基準関数との差を確認できます。':
+  phase==='error'?'学習が停止しました。実行デバイスや関数の安全性を確認してください。':
+  phase==='partial'?'一部の課題が失敗しました。総合スコアは確定しません。タスク別結果と失敗理由を確認してください。':
+  workflow.sharing.enabled?'曲線を作成し、学習評価した後に必要なら共有できます。':'手描き・解析・評価は端末内で実行します。URL共有は接続待ちです。';
+}
+function dispatchWorkflow(event){
+ const next=transitionWorkflow(workflow,event);if(next===workflow)return false;
+ workflow=next;state.busy=isEvaluationBusy(workflow);renderWorkflowStatus();return true;
+}
+
 const fmt=(v,d=3)=>Number.isFinite(v)?v.toFixed(d):'—',pct=v=>Number.isFinite(v)?(v*100).toFixed(1)+'%':'—';
 function toast(message){$('toast').textContent=message;$('toast').style.display='block';clearTimeout(toastTimer);toastTimer=setTimeout(()=>$('toast').style.display='none',5000);}
 function download(name,data,type='application/json'){const blob=data instanceof Blob?data:new Blob([data],{type}),url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),2000);}
 async function copy(text){try{await navigator.clipboard.writeText(text);toast('コピーしました。');}catch{toast('コピーできません。入力欄を選択してコピーしてください。');}}
-function invalidateScore(){if(state.result){state.scoreStale=true;renderSuiteScore();syncScoreStale();}}
+function invalidateScore(){
+ dispatchWorkflow({type:'DOCUMENT_CHANGED'});
+ if(state.pending&&!state.pending.success&&workflow.sharing.phase==='idle'){
+  state.pending=null;$('delete-secret').value='';if($('share-dialog').open)$('share-dialog').close();
+ }else if(state.pending&&!state.pending.success&&state.pending.body){
+  // An ambiguously accepted submission retains its original deletion receipt.
+  $('share-recovery-confirm').checked=false;
+  if(workflow.sharing.phase==='posting')
+   $('share-status').textContent='曲線を編集しました。送信中の投稿は編集前の曲線です。結果の確認まで削除キーを保管してください。';
+  else if(workflow.sharing.phase==='error')
+   $('share-status').textContent='旧版の投稿結果を確認できていません。現在の曲線は送信しません。削除キーを保管してください。';
+  consentChanged();
+ }
+ if(state.result){state.scoreStale=true;renderSuiteScore();syncScoreStale();}
+}
 function setDef(d,{history=true,controls=false}={}){
   try{const clean=validateDefinition(d);if(history){state.history.push(snapshot());if(state.history.length>50)state.history.shift();state.future=[];}state.def=clean;state.dirty=true;invalidateScore();if(controls)refreshControls();scheduleRender();}
   catch(e){toast(e.message);}
@@ -86,11 +128,11 @@ $('curve-canvas').addEventListener('pointerdown',event=>{if(state.mode!=='sketch
 });
 $('curve-canvas').addEventListener('pointermove',event=>{const p=pointerCoord(event);if(!p)return;try{const f=compileDefinition(state.def);$('coordinate-readout').textContent=`x ${fmt(p.x,3)}   f(x) ${fmt(f(p.x)[0],3)}`;}catch{}
   if(!gesture)return;if(gesture.points){if(gesture.points.length<2048)gesture.points.push([p.x,p.y]);drawPlot();}
-  else{const i=gesture.point,d=clone(state.def),prev=d.points[i-1]?.[0]??-100,next=d.points[i+1]?.[0]??100;if(p.x>prev+1e-5&&p.x<next-1e-5&&Math.abs(p.y)<=100){d.points[i]=[p.x,p.y];d.domain=[d.points[0][0],d.points.at(-1)[0]];try{state.def=validateDefinition(d);state.analysis=analyze(d);drawPlot();}catch{}}}
+  else{const i=gesture.point,d=clone(state.def),prev=d.points[i-1]?.[0]??-100,next=d.points[i+1]?.[0]??100;if(p.x>prev+1e-5&&p.x<next-1e-5&&Math.abs(p.y)<=100){d.points[i]=[p.x,p.y];d.domain=[d.points[0][0],d.points.at(-1)[0]];try{state.def=validateDefinition(d);state.analysis=analyze(d);if(!gesture.changed){gesture.changed=true;invalidateScore();}drawPlot();}catch{}}}
 });
 function finishGesture(){if(!gesture)return;const g=gesture;gesture=null;
   if(g.points){try{if(g.points.length<2)return;const clean=normalizeStrokePoints(g.points);const d={schema:1,engine:'neurocurve-1',kind:'sketch',points:clean,domain:[clean[0][0],clean.at(-1)[0]]};validateDefinition(d);setDef(d,{controls:true});$('sketch-status').textContent=`描画完了：${g.points.length}筆跡点 → ${clean.length}制御点。PCHIPで再計算しました。`; }catch(e){toast(e.message);render();}}
-  else{state.history.push({definition:g.before,origin:clone(state.source)});state.future=[];state.dirty=true;invalidateScore();refreshControls();render();}
+  else{state.history.push({definition:g.before,origin:clone(state.source)});state.future=[];state.dirty=true;if(!g.changed)invalidateScore();refreshControls();render();}
 }
 $('curve-canvas').addEventListener('pointerup',finishGesture);$('curve-canvas').addEventListener('pointercancel',()=>{if(gesture)state.def=gesture.before;gesture=null;render();});
 all('[data-tab]').forEach(b=>b.onclick=()=>tab(b.dataset.tab));all('[data-mode]').forEach(b=>b.onclick=()=>mode(b.dataset.mode));
@@ -134,6 +176,8 @@ function syncScoreStale(){
  }
 }
 function scopeChanged(){
+ dispatchWorkflow({type:'SELECTION_CHANGED',key:evaluationKey()});
+ if(state.result&&workflow.evaluation.phase==='stale')state.scoreStale=true;
  const scope=$('evaluation-scope').value,selected=scope!=='single';
  $('dataset').disabled=selected||state.busy;$('dataset').closest('label').classList.toggle('hidden',selected);
  $('suite-overview').classList.toggle('hidden',!selected);
@@ -194,48 +238,101 @@ $('share-score-pack').onclick=async()=>{
  else{download(name,file);toast('共有用JSONを保存しました。ファイルを送る相手を自分で選んでください。公開URLではありません。');}}
  catch(e){if(e.name!=='AbortError')toast('ファイル共有に失敗しました。保存してから共有してください。');}
 };
-function finishWorker(){clearTimeout(workerTimer);$('workspace').inert=false;state.worker?.terminate();state.worker=null;state.busy=false;$('stop-training').disabled=true;$('dataset').disabled=false;$('benchmark-mode').disabled=false;$('compute-backend').disabled=false;$('evaluation-scope').disabled=false;scopeChanged();$('start-training').disabled=!state.analysis.safe;}
+function finishWorker(){clearTimeout(workerTimer);$('workspace').inert=false;state.worker?.terminate();state.worker=null;state.busy=isEvaluationBusy(workflow);$('stop-training').disabled=true;$('dataset').disabled=false;$('benchmark-mode').disabled=false;$('compute-backend').disabled=false;$('evaluation-scope').disabled=false;scopeChanged();$('start-training').disabled=!state.analysis.safe;}
 $('start-training').onclick=()=>{
   if(state.busy||!state.analysis.safe)return;if(!window.Worker)return toast('このブラウザはWorkerに対応していません。');
-  state.runConfig={scope:$('evaluation-scope').value,dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value};state.suiteReports=[];state.scoreStale=false;renderSuiteScore();state.backendInfo=null;$('effective-backend').textContent='GPU検査待ち / CPUも利用可';$('compute-backend').disabled=true;$('evaluation-scope').disabled=true;state.busy=true;state.runs=[];state.loss={};state.result=null;$('export-results').disabled=true;$('start-training').disabled=true;$('stop-training').disabled=false;$('dataset').disabled=true;$('benchmark-mode').disabled=true;$('training-progress').value=0;$('training-status').textContent='初期化中 / この端末で実行';$('paired-results').replaceChildren();$('results-body').replaceChildren();drawLoss();
-  let worker;try{worker=new Worker('/worker.js',{type:'module'});}catch{ $('training-status').textContent='起動失敗: Workerを開始できません。';finishWorker();return;}state.worker=worker;$('workspace').inert=true;workerTimer=setTimeout(()=>{$('training-status').textContent='起動失敗: Workerの応答がありません。';finishWorker();},15000);
-  worker.onmessage=({data:e})=>{clearTimeout(workerTimer);if(e.type==='probe-start'){$('training-status').textContent='WebGPUの実演算を検査中';$('training-detail').textContent='GPUコンピュート検証。停止ボタンで中断できます。';}
-    else if(e.type==='backend'){state.backendInfo=e;$('effective-backend').textContent=e.effective==='webgpu-compute'?'WebGPU · Float32':'CPU / JavaScript · Float64';$('training-status').textContent=e.effective==='webgpu-compute'?'WebGPUで学習を開始':'CPUで学習を開始';$('training-detail').textContent=e.reason;if(e.effective==='native-js-cpu'&&e.selected==='auto')toast('WebGPUは利用できませんでした。CPUで実行します。 '+e.reason);}
+   if(!dispatchWorkflow({type:'RUN_START'}))return;const runId=workflow.evaluation.runId;
+  state.runConfig={scope:$('evaluation-scope').value,dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value};state.suiteReports=[];state.scoreStale=false;renderSuiteScore();state.backendInfo=null;$('effective-backend').textContent='GPU検査待ち / CPUも利用可';$('compute-backend').disabled=true;$('evaluation-scope').disabled=true;state.runs=[];state.loss={};state.result=null;$('export-results').disabled=true;$('start-training').disabled=true;$('stop-training').disabled=false;$('dataset').disabled=true;$('benchmark-mode').disabled=true;$('training-progress').value=0;$('training-status').textContent='初期化中 / この端末で実行';$('paired-results').replaceChildren();$('results-body').replaceChildren();drawLoss();
+  let worker;try{worker=new Worker('/worker.js',{type:'module'});}catch{dispatchWorkflow({type:'RUN_FAILURE',runId,error:'Workerを開始できません'});$('training-status').textContent='起動失敗: Workerを開始できません。';finishWorker();return;}state.worker=worker;$('workspace').inert=true;workerTimer=setTimeout(()=>{if(state.worker!==worker||workflow.evaluation.runId!==runId)return;dispatchWorkflow({type:'RUN_FAILURE',runId,error:'Workerの応答がありません'});$('training-status').textContent='起動失敗: Workerの応答がありません。';finishWorker();},15000);
+  worker.onmessage=({data:e})=>{if(state.worker!==worker||workflow.evaluation.runId!==runId||!isEvaluationBusy(workflow))return;clearTimeout(workerTimer);if(e.type==='probe-start'){$('training-status').textContent='WebGPUの実演算を検査中';$('training-detail').textContent='GPUコンピュート検証。停止ボタンで中断できます。';}
+    else if(e.type==='backend'){dispatchWorkflow({type:'RUN_READY',runId});state.backendInfo=e;$('effective-backend').textContent=e.effective==='webgpu-compute'?'WebGPU · Float32':'CPU / JavaScript · Float64';$('training-status').textContent=e.effective==='webgpu-compute'?'WebGPUで学習を開始':'CPUで学習を開始';$('training-detail').textContent=e.reason;if(e.effective==='native-js-cpu'&&e.selected==='auto')toast('WebGPUは利用できませんでした。CPUで実行します。 '+e.reason);}
     else if(e.type==='suite-task-start'){state.runConfig.dataset=e.dataset;state.runs=[];state.loss={};drawLoss();$('training-status').textContent=`${TASK_LABEL[e.dataset]} / ${e.taskIndex+1} / ${e.taskCount} 課題`;renderSuiteScore();}
     else if(e.type==='suite-task-end'){state.suiteReports.push(e.report);renderSuiteScore();$('training-progress').value=(e.taskIndex+1)/e.taskCount;}
     else if(e.type==='self-test'){$('training-detail').textContent=`数学自己検査: ${e.result.checked}点 / 最大微分誤差 ${e.result.maxError.toExponential(2)}`;}else if(e.type==='run-start'){$('training-status').textContent=`${e.name} を学習中`;$('training-detail').textContent=`seed ${e.seed} · ${e.index+1}/${e.total} 実行`;state.loss[`${e.name}:${e.seed}`]=[];}
     else if(e.type==='progress'){state.loss[`${e.name}:${e.seed}`].push({step:e.step,loss:e.loss});$('training-progress').value=e.taskCount?(e.taskIndex+(e.index+e.step/e.steps)/e.total)/e.taskCount:(e.index+e.step/e.steps)/e.total;$('training-detail').textContent=`seed ${e.seed} · ${e.step}/${e.steps} 更新 · ${e.index+1}/${e.total} 実行`;drawLoss();}
     else if(e.type==='run-end'){state.runs.push(e.run);renderResults();}
-    else if(e.type==='complete'){state.result=e.result;state.result.environment={userAgent:navigator.userAgent,logicalProcessors:navigator.hardwareConcurrency??null,backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown',clock:'not fixed / not available from browser'};if(state.result.kind==='suite'){state.suiteReports=state.result.reports;renderSuiteScore();$('training-status').textContent=state.result.score.complete?'全課題の評価が完了':'全課題を実行・一部失敗';}else{$('training-status').textContent=`評価終了 / ${state.runs.filter(r=>!r.failed).length} 成功・${state.runs.filter(r=>r.failed).length} 失敗`;} $('training-detail').textContent='結果はこのタブ内のみ。サーバーに送信していません。';$('training-progress').value=1;$('export-results').disabled=false;finishWorker();renderResults();}
-    else if(e.type==='error'){$('training-status').textContent='実行停止: '+e.message;finishWorker();}};
-  worker.onerror=e=>{$('training-status').textContent='実行エラー。ブラウザまたは共通データの取得状況を確認してください。';finishWorker();};
+    else if(e.type==='complete'){dispatchWorkflow({type:e.result?.kind==='suite'&&!e.result.score?.complete?'RUN_PARTIAL':'RUN_SUCCESS',runId,error:'一部課題が失敗'});state.result=e.result;state.scoreStale=workflow.evaluation.phase==='stale';state.result.environment={userAgent:navigator.userAgent,logicalProcessors:navigator.hardwareConcurrency??null,backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown',clock:'not fixed / not available from browser'};if(state.result.kind==='suite'){state.suiteReports=state.result.reports;renderSuiteScore();$('training-status').textContent=state.result.score.complete?'全課題の評価が完了':'全課題を実行・一部失敗';}else{$('training-status').textContent=`評価終了 / ${state.runs.filter(r=>!r.failed).length} 成功・${state.runs.filter(r=>r.failed).length} 失敗`;} $('training-detail').textContent='結果はこのタブ内のみ。サーバーに送信していません。';$('training-progress').value=1;$('export-results').disabled=false;finishWorker();renderResults();}
+    else if(e.type==='error'){dispatchWorkflow({type:'RUN_FAILURE',runId,error:e.message});$('training-status').textContent='実行停止: '+e.message;finishWorker();}};
+  worker.onerror=e=>{if(state.worker!==worker||workflow.evaluation.runId!==runId)return;dispatchWorkflow({type:'RUN_FAILURE',runId,error:e?.message??'Worker error'});$('training-status').textContent='実行エラー。ブラウザまたは共通データの取得状況を確認してください。';finishWorker();};
   worker.postMessage({type:'start',definition:clone(state.def),dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value,scope:$('evaluation-scope').value});
 };
 $('evaluation-scope').onchange=scopeChanged;$('benchmark-mode').onchange=scopeChanged;$('compute-backend').onchange=scopeChanged;$('dataset').onchange=scopeChanged;scopeChanged();
-$('stop-training').onclick=()=>{finishWorker();$('training-status').textContent='学習を中断しました';$('training-detail').textContent='Workerを終了しました。GPU側の計算停止・解放はブラウザが管理します。';};
+$('stop-training').onclick=()=>{dispatchWorkflow({type:'RUN_CANCEL',runId:workflow.evaluation.runId});finishWorker();$('training-status').textContent='学習を中断しました';$('training-detail').textContent='Workerを終了しました。GPU側の計算停止・解放はブラウザが管理します。';};
 $('export-results').onclick=()=>{if(state.result)download('NeuroCurve-experiment.json',JSON.stringify(state.result,null,2));};
 const hex=bytes=>Array.from(bytes,b=>b.toString(16).padStart(2,'0')).join('');
 const randomHex=n=>hex(crypto.getRandomValues(new Uint8Array(n)));
 const digest=async s=>hex(new Uint8Array(await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s))));
 async function api(path,options={}){const r=await fetch(path,{...options,headers:{'Content-Type':'application/json',...options.headers},cache:'no-store'});let b;try{b=await r.json();}catch{b={};}if(!r.ok)throw new Error(b.error??'接続に失敗しました。');return b;}
-function consentChanged(){$('publish-share').disabled=!$('share-consent').checked||!$('key-saved').checked||!state.pending||state.pending.success;}
-$('share-consent').onchange=consentChanged;$('key-saved').onchange=consentChanged;
+function consentChanged(){
+ const p=state.pending,older=!!p?.body&&mayRecoverShare(workflow);
+ $('share-recovery').classList.toggle('hidden',!older);
+ if(!older)$('share-recovery-confirm').checked=false;
+ $('share-discard').classList.toggle('hidden',workflow.sharing.phase!=='error');
+ $('publish-share').textContent=older?'編集前の曲線を再確認する':workflow.sharing.phase==='error'?'同じ投稿を再確認する':'同意して投稿する';
+ const allowed=maySubmitShare(workflow)||(older&&$('share-recovery-confirm').checked);
+ $('publish-share').disabled=!p?.deleteHash||!!p.success||!$('share-consent').checked||!$('key-saved').checked||!allowed;
+}
+$('share-consent').onchange=consentChanged;$('key-saved').onchange=consentChanged;$('share-recovery-confirm').onchange=consentChanged;
 $('share-button').onclick=async()=>{
   if(state.source)return toast('この関数は他者の投稿由来です。ローカルで編集・評価できますが、この版では再投稿しません。');
   if(!state.config?.sharingEnabled)return toast('この配信環境では共有APIを利用できません。ローカル版サーバーを起動すると利用できます。');
   try{
-    if(!state.pending||state.pending.success){const secret=randomHex(32);state.pending={secret,shareId:randomHex(16),requestId:randomHex(16),definition:clone(state.def),deleteHash:await digest(secret),body:null,success:false};$('delete-secret').value=secret;$('delete-secret').type='password';$('share-title').value='';$('share-description').value='';$('share-days').value='7';$('share-consent').checked=false;$('key-saved').checked=false;$('share-success').classList.add('hidden');$('share-status').textContent='';for(const id of ['share-title','share-description','share-days'])$(id).disabled=false;}
-    consentChanged();$('share-dialog').showModal();
-  }catch{toast('安全な乱数を利用できません。HTTPSまたはlocalhostで開いてください。');}
+    if(!state.pending||state.pending.success){
+      const secret=randomHex(32);
+      const p={secret,shareId:randomHex(16),requestId:randomHex(16),definition:clone(state.def),deleteHash:null,body:null,success:false};
+      // Register the exact revision before asynchronous hashing begins.
+      if(!dispatchWorkflow({type:'SHARE_PREPARE',requestId:p.requestId}))return;
+      state.pending=p;
+      $('delete-secret').value=secret;$('delete-secret').type='password';
+      $('share-title').value='';$('share-description').value='';$('share-days').value='7';
+      $('share-consent').checked=false;$('key-saved').checked=false;$('share-recovery-confirm').checked=false;
+      $('share-success').classList.add('hidden');$('share-status').textContent='';
+      for(const id of ['share-title','share-description','share-days'])$(id).disabled=false;
+      p.deleteHash=await digest(secret);
+      // Edits during hashing invalidate the new draft and its pending deletion key.
+      if(state.pending!==p||workflow.sharing.phase!=='prepared'||workflow.sharing.requestId!==p.requestId)return;
+    }else if(!state.pending.deleteHash){toast('削除キーを準備中です。');return;
+    }else if(workflow.sharing.phase==='posting'){toast('投稿結果を確認中です。');return;
+    }else if(!['prepared','error'].includes(workflow.sharing.phase)){toast('共有状態を再確認してください。');return;}
+    // Re-opening a potentially accepted request never rebinds it to the current curve.
+    consentChanged();if(!$('share-dialog').open)$('share-dialog').showModal();
+  }catch{
+    if(state.pending&&!state.pending.deleteHash&&workflow.sharing.phase==='prepared'){
+      dispatchWorkflow({type:'SHARE_RESET'});state.pending=null;$('delete-secret').value='';
+    }
+    toast('安全な乱数またはハッシュ計算を利用できません。HTTPSまたはlocalhostで開いてください。');
+  }
 };
 $('copy-secret').onclick=()=>copy($('delete-secret').value);$('reveal-secret').onclick=()=>{$('delete-secret').type=$('delete-secret').type==='password'?'text':'password';};
 $('download-key').onclick=()=>{if(!state.pending)return;download('NeuroCurve-delete-receipt.json',JSON.stringify({shareUrl:(state.config?.origin??location.origin)+'/f/'+state.pending.shareId,deleteSecret:state.pending.secret,requestId:state.pending.requestId,warning:'秘密キーです。第三者に渡さないでください。'},null,2));};
 $('publish-share').onclick=async()=>{
   if(!$('share-consent').checked||!$('key-saved').checked||!state.pending)return;const p=state.pending;
+  const recovering=!!p.body&&mayRecoverShare(workflow);
+  const event=recovering?{type:'SHARE_RECOVER',requestId:p.requestId,consent:true,keySaved:true,originalConfirmed:$('share-recovery-confirm').checked}:
+   {type:'SHARE_SUBMIT',requestId:p.requestId,consent:true,keySaved:true};
+  if(!dispatchWorkflow(event))return;
   if(!p.body)p.body={shareId:p.shareId,requestId:p.requestId,deleteHash:p.deleteHash,definition:p.definition,title:$('share-title').value,description:$('share-description').value,days:$('share-days').value==='unlimited'?null:Number($('share-days').value),consent:true,termsVersion:'2026-10-v1',reuse:'local-only'};
   $('publish-share').disabled=true;for(const id of ['share-title','share-description','share-days'])$(id).disabled=true;$('share-status').textContent='投稿を確認中…';
-  try{const r=await api('/api/shares',{method:'POST',body:JSON.stringify(p.body)});p.success=true;$('share-url').value=r.url;$('share-expiry').textContent=r.expiresAt?'公開期限: '+new Date(r.expiresAt).toLocaleString()+' / UTC '+r.expiresAt:'期限設定なし。サービスの永続を保証しません。';$('share-success').classList.remove('hidden');$('share-status').textContent='関数定義のみ投稿しました。学習結果は送信していません。';}
-  catch(e){$('share-status').textContent=e.message+' 同じキー・同じ内容で再試行できます。このタブを閉じないでください。';$('publish-share').disabled=false;}
+  try{const r=await api('/api/shares',{method:'POST',body:JSON.stringify(p.body)});p.success=true;dispatchWorkflow({type:'SHARE_SUCCESS',requestId:p.requestId});$('share-url').value=r.url;$('share-expiry').textContent=r.expiresAt?'公開期限: '+new Date(r.expiresAt).toLocaleString()+' / UTC '+r.expiresAt:'期限設定なし。サービスの永続を保証しません。';$('share-success').classList.remove('hidden');$('share-status').textContent=workflow.sharing.preparedRevision!==workflow.documentRevision?
+     '編集前の曲線を共有しました。現在の編集内容とは異なります。学習結果は送信していません。':
+     '関数定義のみ投稿しました。学習結果は送信していません。';consentChanged();}
+  catch(e){
+    dispatchWorkflow({type:'SHARE_FAILURE',requestId:p.requestId,error:e.message});
+    $('share-recovery-confirm').checked=false;
+    $('share-status').textContent=workflow.sharing.preparedRevision!==workflow.documentRevision?
+      e.message+' 投稿結果は不明です。編集前の曲線を同じ投稿ID・定義で再確認できます。削除キーを保管してください。':
+      e.message+' 投稿が成立している可能性があります。同じ内容と投稿IDで再確認できます。削除キーを保管してください。';
+    consentChanged();
+   }
+};
+$('share-discard').onclick=()=>{
+ if(workflow.sharing.phase!=='error'||!state.pending?.body)return;
+ if(!$('key-saved').checked){toast('削除キーを保管してから操作してください。');return;}
+ if(!window.confirm('通信失敗でも以前の投稿が受理されている場合があります。削除キーの控えを保管したうえで、古い投稿の確認を終了しますか？'))return;
+ if(!dispatchWorkflow({type:'SHARE_RESET'}))return;
+ state.pending=null;$('delete-secret').value='';$('share-recovery-confirm').checked=false;
+ $('share-dialog').close();
+ toast('旧投稿の確認を終了しました。新しい投稿は別のIDと削除キーで行います。');
 };
 $('copy-share').onclick=()=>copy($('share-url').value);$('native-share').onclick=async()=>{if(!navigator.share)return copy($('share-url').value);try{await navigator.share({title:'NeuroCurve',url:$('share-url').value});}catch(e){if(e.name!=='AbortError')toast('共有できません。URLコピーをご利用ください。');}};
 all('.close-dialog').forEach(b=>b.onclick=()=>b.closest('dialog').close());
@@ -247,10 +344,11 @@ $('report-send').onclick=async()=>{try{const shareId=extractId($('report-id').va
 $('shared-edit').onclick=()=>{state.dirty=true;toast('このタブ内で編集できます。元の投稿は変更されません。');};
 window.addEventListener('beforeunload',e=>{if(state.dirty||state.busy||state.pending&&!state.pending.success){e.preventDefault();e.returnValue='';}});
 window.addEventListener('resize',()=>{drawPlot();drawLoss();});
-buildParameters();buildIndividual();refreshControls();render();
+buildParameters();buildIndividual();refreshControls();render();renderWorkflowStatus();
 async function initialize(){
-  if(window.NC_OFFLINE_MODE){state.config={sharingEnabled:false};$('share-button').disabled=true;$('share-button').textContent='URL共有は準備中';return;}
+  if(window.NC_OFFLINE_MODE){state.config={sharingEnabled:false};dispatchWorkflow({type:'SHARING_AVAILABLE',enabled:false});$('share-button').disabled=true;$('share-button').textContent='URL共有は準備中';return;}
   try{state.config=await api('/api/config');}catch{state.config={sharingEnabled:false};}
+   dispatchWorkflow({type:'SHARING_AVAILABLE',enabled:state.config?.sharingEnabled===true});
   const match=/^\/f\/([a-f0-9]{32})$/.exec(location.pathname);
   if(match){try{const shared=await api('/api/shares/'+match[1]);state.shared=shared;state.source={shareId:shared.shareId,contentHash:shared.contentHash,reuse:shared.reuse};state.def=validateDefinition(shared.definition);state.mode=state.def.kind;$('shared-title').textContent=shared.title||'共有された活性化関数';$('shared-details').textContent=(shared.description?shared.description+' / ':'')+(shared.expiresAt?'期限 '+new Date(shared.expiresAt).toLocaleString():'期限設定なし');$('shared-banner').classList.remove('hidden');$('share-button').disabled=true;refreshControls();render();}catch(e){toast(e.message);}}
 }

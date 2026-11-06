@@ -138,3 +138,9 @@ npm run build:sites-static
 python tests/browser_ux.py       # Workerをモックした画面操作の検証であり、学習計算ではない
 python tests/browser_real_cpu.py # CPUによる実学習のブラウザ試験
 ```
+
+## 明示的な状態機械（2026-11-06）
+
+編集中・学習準備中・実行中・評価完了・旧結果・中断・エラー・共有準備・投稿中を、純粋な状態遷移で管理します。Workerの実行ID、曲線のリビジョン、評価条件、共有の同意とリクエストIDを検査し、遅延通知による誤表示を防ぎます。詳細は[状態機械の設計と検証](docs/STATE_MACHINE_ARCHITECTURE.md)を参照してください。
+
+**ChatGPT Sitesの現行公開版への再デプロイや本番共有API接続は、このソース改善では実施していません。**
