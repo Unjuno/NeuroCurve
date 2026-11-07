@@ -1,12 +1,13 @@
 import {defaultDefinition,validateDefinition,compileDefinition,analyze,PRESETS,PARAMS,samplePoints,inspectSketch} from './core/activation.js';
 import {exportPython,functionCSV,curveSVG} from './core/export.js';
 import {summarize} from './core/training.js';
-import {initialWorkflow,transitionWorkflow,isEvaluationBusy,isCurrentResult,maySubmitShare,mayRecoverShare,workflowLabel} from './core/workflow-machine.js';
+import {initialWorkflow,transitionWorkflow,isEvaluationBusy,isCurrentResult,canCertifySuiteScore,maySubmitShare,mayRecoverShare,workflowLabel} from './core/workflow-machine.js';
 import {normalizeStrokePoints} from './core/sketch-stroke.js';
+import {createWorkerWatchdog} from './core/worker-watchdog.js';
 import {SUITES,scoreSuite,TASK_LABEL,CATEGORY_LABEL,DATASET_TASK} from './core/suite.js';
 const $=id=>document.getElementById(id),all=s=>[...document.querySelectorAll(s)],clone=x=>structuredClone(x);
 const state={def:defaultDefinition(),analysis:null,mode:'valleys',tab:'studio',history:[],future:[],comparison:null,derivative:false,drawTool:'draw',source:null,shared:null,busy:false,worker:null,result:null,runConfig:null,runs:[],loss:{},config:null,pending:null,dirty:false,backendInfo:null,suiteReports:[],scoreStale:false};
-let toastTimer,renderTimer,workerTimer,plotView=null,gesture=null;
+let toastTimer,renderTimer,workerWatchdog=null,plotView=null,gesture=null;
 const snapshot=()=>({definition:clone(state.def),origin:clone(state.source)});
 // Reducer is the source of truth for phase, run identity and revision validity.
 let workflow=initialWorkflow();
@@ -188,14 +189,29 @@ function scopeChanged(){
 function renderSuiteScore(){
  const scope=$('evaluation-scope').value;
  if(scope==='single'){syncScoreStale();return;}
- const outdated=!!state.result&&(state.scoreStale||!matchesRunSelection());
+ const inFlightStale=isEvaluationBusy(workflow)&&
+  (workflow.evaluation.runRevision!==workflow.documentRevision||
+   workflow.evaluation.runSelection!==workflow.evaluation.selection);
+ const outdated=(!!state.result&&(state.scoreStale||!matchesRunSelection()))||inFlightStale;
  const score=scoreSuite(outdated?[]:state.suiteReports,scope),table=$('suite-tasks');
+ const certified=canCertifySuiteScore(workflow,{
+  scoreComplete:score.complete&&state.result?.score?.complete===true,
+  selectionMatches:!state.scoreStale&&matchesRunSelection(),
+  resultMatches:state.result?.kind==='suite'
+ });
  const cards=$('suite-task-cards');cards.replaceChildren();
- table.replaceChildren();$('suite-score').textContent=score.overall===null?'—':score.overall.toFixed(2);
- $('suite-status').textContent=score.complete?(score.status==='exploratory'?'探索結果 / 1シード':'複数シード・記述的評価'):`進行中または未完了 ${score.tasks.filter(Boolean).length}/${score.tasks.length}`;
- $('suite-credits').textContent=score.complete?'基準50点：ReLU / Swish / GELUの同一条件での誤差中央値と比較。カテゴリー均等重み。一般的優位性の証明ではありません。':'未実行・失敗の課題は総合点に含めず、全課題成功まで総合点を表示しません。';
+ table.replaceChildren();$('suite-score').textContent=certified?score.overall.toFixed(2):'—';
+ $('suite-status').textContent=certified?
+  (score.status==='exploratory'?'探索結果 / 1シード':'複数シード・記述的評価'):
+  outdated?'曲線・条件の変更後は再評価が必要':
+  workflow.evaluation.phase==='partial'?'一部失敗 / 総合点未確定':
+  score.complete?'最終完了通知を確認中':
+  `進行中または未完了 ${score.tasks.filter(Boolean).length}/${score.tasks.length}`;
+ $('suite-credits').textContent=certified?
+  '基準50点：ReLU / Swish / GELUの同一条件での誤差中央値と比較。カテゴリー均等重み。一般的優位性の証明ではありません。':
+  'タスク別の値は途中結果です。最終完了通知と全課題の成功を確認するまで総合点を表示しません。';
  const better=score.tasks.filter(t=>t?.score>50).length;
- $('score-balance').textContent=score.complete?`${score.tasks.length}課題中 ${better}課題で基準50点を上回りました。数値の高低は今回の条件に限ります。`:`${score.tasks.filter(Boolean).length}/${score.tasks.length}課題を評価済み。全課題が成功すると総合点を確定します。`;
+ $('score-balance').textContent=certified?`${score.tasks.length}課題中 ${better}課題で基準50点を上回りました。数値の高低は今回の条件に限ります。`:`${score.tasks.filter(Boolean).length}/${score.tasks.length}課題の途中結果を表示中。全課題の完了と検証後に総合点を確定します。`;
  const categories=$('suite-categories');categories.replaceChildren();
  for(const [id,value] of Object.entries(score.categories)){const row=document.createElement('div');row.className='category-row';const title=document.createElement('span');title.textContent=CATEGORY_LABEL[id];const scale=document.createElement('div');scale.className='category-scale';const bar=document.createElement('progress');bar.max=100;bar.value=value??0;bar.setAttribute('aria-label',CATEGORY_LABEL[id]+' 相対点・基準50点');scale.append(bar);const num=document.createElement('strong');num.textContent=value===null?'—':value.toFixed(2);row.append(title,scale,num);categories.append(row);}
  for(const name of SUITES[scope].tasks){
@@ -212,18 +228,22 @@ function renderSuiteScore(){
   const stateText=document.createElement('small');stateText.textContent=task?(task.score>50?'基準より良好':task.score<50?'基準未満':'基準と同等'):report?'失敗 / データを確認':'未実行';
   article.append(heading,meter,desc,stateText);cards.append(article);
  }
- const ready=score.complete&&!state.scoreStale&&matchesRunSelection()&&!!state.result?.score?.complete;
+ const ready=certified;
  for(const id of ['export-scorecard','copy-score-summary','share-score-pack'])$(id).disabled=!ready;
  syncScoreStale();
 }
 function scoreCardText(){
  const r=state.result,score=r?.score;
- if(!r||r.kind!=='suite'||!score?.complete||state.scoreStale||!matchesRunSelection())return '';
+ if(!r||!canCertifySuiteScore(workflow,{
+  scoreComplete:!!score?.complete,selectionMatches:!state.scoreStale&&matchesRunSelection(),resultMatches:r.kind==='suite'
+ }))return '';
  return `NeuroCurve / ${score.suiteName} 相対スコア: ${score.overall}/100 (基準50)\n`+score.tasks.map(t=>`${t.label}: ${t.score}/100`).join('\n')+`\n${r.mode==='quick'?'1シード探索':'5シード記述評価'} / ${r.backendSelection?.effective??'unknown'} / 測定結果は自己申告・独立検証なし。`;
 }
 $('copy-score-summary').onclick=()=>{const value=scoreCardText();if(value)copy(value);};
 $('export-scorecard').onclick=()=>{
- const r=state.result,score=r?.score;if(!score?.complete||state.scoreStale||!matchesRunSelection())return;
+ const r=state.result,score=r?.score;if(!canCertifySuiteScore(workflow,{
+  scoreComplete:!!score?.complete,selectionMatches:!state.scoreStale&&matchesRunSelection(),resultMatches:r?.kind==='suite'
+ }))return;
  const xml=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&apos;'}[c]));
  const rows=score.tasks.map((t,i)=>`<text x="56" y="${225+28*i}" font-size="16" fill="#e3efed">${xml(t.label)}<tspan x="650" text-anchor="end" fill="#91f2bd">${t.score.toFixed(2)}</tspan></text>`).join('');
  const height=270+score.tasks.length*28;
@@ -231,20 +251,36 @@ $('export-scorecard').onclick=()=>{
  download('NeuroCurve-challenge-score.svg',svg,'image/svg+xml');
 };
 $('share-score-pack').onclick=async()=>{
- const r=state.result,score=r?.score;if(!score?.complete||state.scoreStale||!matchesRunSelection())return;
+ const r=state.result,score=r?.score;if(!canCertifySuiteScore(workflow,{
+  scoreComplete:!!score?.complete,selectionMatches:!state.scoreStale&&matchesRunSelection(),resultMatches:r?.kind==='suite'
+ }))return;
  const pack={format:'neurocurve-share-pack-v1',definition:clone(r.definition),benchmark:{suiteId:r.suiteId,mode:r.mode,score:clone(score)},environment:{backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown'},notice:'ユーザーが明示的に共有した自己申告スコア。サーバー検証・性能優位性の証明ではありません。削除キー・生データは含みません。'};
  const name='NeuroCurve-share-pack.json',file=new File([JSON.stringify(pack,null,2)],name,{type:'application/json'});
  try{if(navigator.canShare?.({files:[file]})&&navigator.share){await navigator.share({title:'NeuroCurve / 評価結果と関数',text:scoreCardText(),files:[file]});toast('端末の共有メニューに渡しました。');}
  else{download(name,file);toast('共有用JSONを保存しました。ファイルを送る相手を自分で選んでください。公開URLではありません。');}}
  catch(e){if(e.name!=='AbortError')toast('ファイル共有に失敗しました。保存してから共有してください。');}
 };
-function finishWorker(){clearTimeout(workerTimer);$('workspace').inert=false;state.worker?.terminate();state.worker=null;state.busy=isEvaluationBusy(workflow);$('stop-training').disabled=true;$('dataset').disabled=false;$('benchmark-mode').disabled=false;$('compute-backend').disabled=false;$('evaluation-scope').disabled=false;scopeChanged();$('start-training').disabled=!state.analysis.safe;}
+function finishWorker(){workerWatchdog?.stop();workerWatchdog=null;$('workspace').inert=false;state.worker?.terminate();state.worker=null;state.busy=isEvaluationBusy(workflow);$('stop-training').disabled=true;$('dataset').disabled=false;$('benchmark-mode').disabled=false;$('compute-backend').disabled=false;$('evaluation-scope').disabled=false;scopeChanged();$('start-training').disabled=!state.analysis.safe;}
 $('start-training').onclick=()=>{
   if(state.busy||!state.analysis.safe)return;if(!window.Worker)return toast('このブラウザはWorkerに対応していません。');
    if(!dispatchWorkflow({type:'RUN_START'}))return;const runId=workflow.evaluation.runId;
   state.runConfig={scope:$('evaluation-scope').value,dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value};state.suiteReports=[];state.scoreStale=false;renderSuiteScore();state.backendInfo=null;$('effective-backend').textContent='GPU検査待ち / CPUも利用可';$('compute-backend').disabled=true;$('evaluation-scope').disabled=true;state.runs=[];state.loss={};state.result=null;$('export-results').disabled=true;$('start-training').disabled=true;$('stop-training').disabled=false;$('dataset').disabled=true;$('benchmark-mode').disabled=true;$('training-progress').value=0;$('training-status').textContent='初期化中 / この端末で実行';$('paired-results').replaceChildren();$('results-body').replaceChildren();drawLoss();
-  let worker;try{worker=new Worker('/worker.js',{type:'module'});}catch{dispatchWorkflow({type:'RUN_FAILURE',runId,error:'Workerを開始できません'});$('training-status').textContent='起動失敗: Workerを開始できません。';finishWorker();return;}state.worker=worker;$('workspace').inert=true;workerTimer=setTimeout(()=>{if(state.worker!==worker||workflow.evaluation.runId!==runId)return;dispatchWorkflow({type:'RUN_FAILURE',runId,error:'Workerの応答がありません'});$('training-status').textContent='起動失敗: Workerの応答がありません。';finishWorker();},15000);
-  worker.onmessage=({data:e})=>{if(state.worker!==worker||workflow.evaluation.runId!==runId||!isEvaluationBusy(workflow))return;clearTimeout(workerTimer);if(e.type==='probe-start'){$('training-status').textContent='WebGPUの実演算を検査中';$('training-detail').textContent='GPUコンピュート検証。停止ボタンで中断できます。';}
+  let worker;try{worker=new Worker('/worker.js',{type:'module'});}catch{dispatchWorkflow({type:'RUN_FAILURE',runId,error:'Workerを開始できません'});$('training-status').textContent='起動失敗: Workerを開始できません。';finishWorker();return;}state.worker=worker;$('workspace').inert=true;
+  workerWatchdog=createWorkerWatchdog({
+   onTimeout:phase=>{
+    if(state.worker!==worker||workflow.evaluation.runId!==runId||!isEvaluationBusy(workflow))return;
+    const message=phase==='startup'?'Workerを起動できませんでした。':'学習Workerから一定時間応答がありません。';
+    dispatchWorkflow({type:'RUN_FAILURE',runId,error:message});
+    $('training-status').textContent='実行停止: '+message;
+    $('training-detail').textContent='途中結果は正式なスコアではありません。必要ならCPUモードで再実行してください。';
+    finishWorker();
+   }
+  });
+  worker.onmessage=({data:e})=>{if(state.worker!==worker||workflow.evaluation.runId!==runId||!isEvaluationBusy(workflow))return;workerWatchdog.activity();if(e.type==='probe-start'){$('training-status').textContent='WebGPUの実演算を検査中';$('training-detail').textContent='GPUコンピュート検証。停止ボタンで中断できます。';}
+    else if(e.type==='gpu-preflight'){
+      $('training-status').textContent='全課題のGPU互換性を確認中';
+      $('training-detail').textContent=`${TASK_LABEL[e.dataset]??e.dataset}：${e.completed}/${e.total}課題、${e.verifiedShapes}種類の入出力形状を確認`;
+    }
     else if(e.type==='backend'){dispatchWorkflow({type:'RUN_READY',runId});state.backendInfo=e;$('effective-backend').textContent=e.effective==='webgpu-compute'?'WebGPU · Float32':'CPU / JavaScript · Float64';$('training-status').textContent=e.effective==='webgpu-compute'?'WebGPUで学習を開始':'CPUで学習を開始';$('training-detail').textContent=e.reason;if(e.effective==='native-js-cpu'&&e.selected==='auto')toast('WebGPUは利用できませんでした。CPUで実行します。 '+e.reason);}
     else if(e.type==='suite-task-start'){state.runConfig.dataset=e.dataset;state.runs=[];state.loss={};drawLoss();$('training-status').textContent=`${TASK_LABEL[e.dataset]} / ${e.taskIndex+1} / ${e.taskCount} 課題`;renderSuiteScore();}
     else if(e.type==='suite-task-end'){state.suiteReports.push(e.report);renderSuiteScore();$('training-progress').value=(e.taskIndex+1)/e.taskCount;}

@@ -1,6 +1,7 @@
 import {runBenchmark,runSuite} from './core/training.js';
 import {probeWebGPU,preflightGpuTraining,trainOneGpu} from './core/webgpu.js';
 import {loadDataset,makeDataset} from './core/data.js';
+import {preflightGpuSuite} from './core/gpu-preflight-plan.js';
 import {analyze,ENGINE} from './core/activation.js';
 
 self.onmessage=async({data})=>{
@@ -12,10 +13,14 @@ self.onmessage=async({data})=>{
    self.postMessage({type:'probe-start',backend:preference});
    gpu=await probeWebGPU(self);
    if(gpu.available){
-    const dataset=await loadDataset(data.dataset);
     const refs=['relu','swish','gelu'].map(name=>({schema:1,engine:ENGINE,kind:'preset',name,domain:[-100,100]}));
-    try{await preflightGpuTraining(gpu.device,[data.definition,...refs],[dataset.inputs,32,32,dataset.outputs],64);}
-    catch(error){try{gpu.device.destroy();}catch{}gpu={available:false,reason:error.message};}
+    try{
+     await preflightGpuSuite({
+      scope:data.scope??'single',dataset:data.dataset,loadDataset,
+      verify:dimensions=>preflightGpuTraining(gpu.device,[data.definition,...refs],dimensions,64),
+      notify:event=>self.postMessage(event)
+     });
+    }catch(error){try{gpu.device.destroy();}catch{}gpu={available:false,reason:'複数課題のGPU互換性検査に失敗: '+String(error.message??error)};}
    }
    if(!gpu.available && preference==='webgpu')throw new Error(gpu.reason+' CPUモードか自動選択に切り替えてください。');
   }

@@ -23,6 +23,10 @@ export function isCurrentResult(state){
  const e=state.evaluation;
  return e.phase==='complete' && e.completedRevision===state.documentRevision && e.completedSelection===e.selection;
 }
+/** Only the exact, complete Worker result may become the certified score. */
+export function canCertifySuiteScore(state,{scoreComplete=false,selectionMatches=false,resultMatches=false}={}){
+ return isCurrentResult(state)&&scoreComplete===true&&selectionMatches===true&&resultMatches===true;
+}
 export function maySubmitShare(state){
  const s=state.sharing;
  return s.enabled && (s.phase==='prepared'||s.phase==='error') && s.preparedRevision===state.documentRevision && !!s.requestId;
