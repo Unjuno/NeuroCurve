@@ -22,5 +22,7 @@ jobs:
         run: npm run check
       - name: Run JavaScript unit and mock integration tests
         run: npm test
+      - name: Run real six-task CPU benchmark smoke (24 training runs)
+        run: npm run benchmark:suite
       - name: Build ChatGPT Sites static bundle
         run: npm run build:sites-static

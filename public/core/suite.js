@@ -1,4 +1,5 @@
 /** Transparent multi-task challenge score. Never replaces per-task scientific results. */
+import {inspectBenchmarkProtocol} from './benchmark-protocol.js';
 export const SUITES=Object.freeze({
  core:Object.freeze({id:'core-v1',name:'基本6課題',tasks:['moons','circles','digits','iris','wave','chirp'],categories:{nonlinear:['moons','circles'],vision:['digits'],tabular:['iris'],signal:['wave','chirp']}}),
  extended:Object.freeze({id:'extended-v1',name:'拡張10課題',tasks:['moons','circles','spiral','xor','digits','iris','wine','breast','wave','chirp'],categories:{nonlinear:['moons','circles','spiral','xor'],vision:['digits'],tabular:['iris','wine','breast'],signal:['wave','chirp']}})
@@ -18,7 +19,8 @@ export function relativeTaskScore(customError,baselineError){
 const isValidMetric=(v,type)=>Number.isFinite(v)&&(type==='classification'?v>=0&&v<=1:v>=0);
 const metricError=(v,type)=>type==='classification'?1-v:v;
 function scoreTask(report){
- const type=DATASET_TASK[report.dataset],expected=report.settings?.seeds;
+ const type=DATASET_TASK[report?.dataset],expected=report?.settings?.seeds;
+ if(!inspectBenchmarkProtocol(report,type).complete)return null;
  if(!type||!Array.isArray(expected)||!expected.length||new Set(expected).size!==expected.length||!Array.isArray(report.runs))return null;
  const names=['Custom','ReLU','Swish','GELU'];
  // Extra/failed/off-protocol runs must never be omitted from the final grade.
