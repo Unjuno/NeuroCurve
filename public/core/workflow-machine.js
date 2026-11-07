@@ -27,6 +27,17 @@ export function isCurrentResult(state){
 export function canCertifySuiteScore(state,{scoreComplete=false,selectionMatches=false,resultMatches=false}={}){
  return isCurrentResult(state)&&scoreComplete===true&&selectionMatches===true&&resultMatches===true;
 }
+/** User-facing score status policy: task completion is not run certification. */
+export function suiteDisplayStatus(state,{
+ certified=false,previewComplete=false,progressCount=0,total=0,scoreMode='exploratory',outdated=false
+}={}){
+ if(outdated||state.evaluation.phase==='stale')return '曲線・条件の変更後は再評価が必要';
+ if(certified)return scoreMode==='exploratory'?'探索結果 / 1シード':'複数シード・記述的評価';
+ if(['partial','error','cancelled'].includes(state.evaluation.phase))
+  return workflowLabel(state)+' / 総合点未確定';
+ if(previewComplete)return '最終完了通知を確認中';
+ return `進行中または未完了 ${progressCount}/${total}`;
+}
 export function maySubmitShare(state){
  const s=state.sharing;
  return s.enabled && (s.phase==='prepared'||s.phase==='error') && s.preparedRevision===state.documentRevision && !!s.requestId;

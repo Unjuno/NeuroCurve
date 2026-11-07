@@ -69,3 +69,5 @@ The user may abandon an ambiguous POST only after affirming the deletion receipt
 **GPU multi-task compatibility:** `core/gpu-preflight-plan.js` inspects every task in the selected suite, compiles/checks kernels once per **unique input/output shape** (Core 6: four; Extended 10: six for the current datasets), and reports per-task progress. One shape failing preflight causes **uniform CPU fallback** when the user selects automatic mode; GPU-required mode fails explicitly instead of silently mixing CPU and GPU task measurements. This still needs WebGPU hardware acceptance testing: mock/unit tests do not prove device-driver correctness.
 
 **Tests:** `tests/evaluation-lifecycle.test.js` and `tests/gpu-preflight-plan.test.js` check phase, staleness, timer races, multi-task topology coverage, GPU failure propagation and UI integration. `npm test`, `npm run check`, and `npm run build:sites-static` must pass on the final SHA before merge.
+
+**Terminal UI outcomes:** `suiteDisplayStatus` reports partial, failed and cancelled evaluations as **uncertified**, never as a perpetual ‘awaiting final notification’ state. Completed task messages alone do not certify success.

@@ -1,7 +1,7 @@
 import {defaultDefinition,validateDefinition,compileDefinition,analyze,PRESETS,PARAMS,samplePoints,inspectSketch} from './core/activation.js';
 import {exportPython,functionCSV,curveSVG} from './core/export.js';
 import {summarize} from './core/training.js';
-import {initialWorkflow,transitionWorkflow,isEvaluationBusy,isCurrentResult,canCertifySuiteScore,maySubmitShare,mayRecoverShare,workflowLabel} from './core/workflow-machine.js';
+import {initialWorkflow,transitionWorkflow,isEvaluationBusy,isCurrentResult,canCertifySuiteScore,suiteDisplayStatus,maySubmitShare,mayRecoverShare,workflowLabel} from './core/workflow-machine.js';
 import {normalizeStrokePoints} from './core/sketch-stroke.js';
 import {createWorkerWatchdog} from './core/worker-watchdog.js';
 import {SUITES,scoreSuite,TASK_LABEL,CATEGORY_LABEL,DATASET_TASK} from './core/suite.js';
@@ -201,12 +201,10 @@ function renderSuiteScore(){
  });
  const cards=$('suite-task-cards');cards.replaceChildren();
  table.replaceChildren();$('suite-score').textContent=certified?score.overall.toFixed(2):'—';
- $('suite-status').textContent=certified?
-  (score.status==='exploratory'?'探索結果 / 1シード':'複数シード・記述的評価'):
-  outdated?'曲線・条件の変更後は再評価が必要':
-  workflow.evaluation.phase==='partial'?'一部失敗 / 総合点未確定':
-  score.complete?'最終完了通知を確認中':
-  `進行中または未完了 ${score.tasks.filter(Boolean).length}/${score.tasks.length}`;
+ $('suite-status').textContent=suiteDisplayStatus(workflow,{
+  certified,previewComplete:score.complete,progressCount:score.tasks.filter(Boolean).length,
+  total:score.tasks.length,scoreMode:score.status,outdated
+ });
  $('suite-credits').textContent=certified?
   '基準50点：ReLU / Swish / GELUの同一条件での誤差中央値と比較。カテゴリー均等重み。一般的優位性の証明ではありません。':
   'タスク別の値は途中結果です。最終完了通知と全課題の成功を確認するまで総合点を表示しません。';
