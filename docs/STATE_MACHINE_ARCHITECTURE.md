@@ -59,3 +59,15 @@ An HTTP POST may have been accepted even if the browser never received the respo
 When the current curve has a different document revision than the previously submitted snapshot, ordinary `SHARE_SUBMIT` is forbidden. The old request can only be retried with the distinct `SHARE_RECOVER` event and the user's explicit confirmation that they are resubmitting the **old** curve, alongside original sharing consent and deletion-key custody confirmation. Every new curve edit clears that additional checkbox, not the key. The UI reports if a successful post represents an older snapshot.
 
 The user may abandon an ambiguous POST only after affirming the deletion receipt is saved and accepting a warning that an earlier request may have been accepted. No client-side drafts, secrets or training results are automatically persisted or uploaded.
+
+## 2026-11-08 — Result certification, Worker liveness and GPU suite preflight
+
+**Certification boundary:** a set of six/ten `suite-task-end` events is not a final benchmark. The UI can show provisional per-task scores as tasks finish, but **must not display the overall Challenge Score or unlock its export/share actions** until the matching Worker emits `complete`. The reducer checks the same document revision, same benchmark selection, and `complete` (not `partial`, `stale`, `cancelled` or `error`) before an overall score is certified. A changed curve during an in-flight run never gets scored with the old curve's result.
+
+**Worker watchdog:** `core/worker-watchdog.js` starts a 15-second startup timer and renews a 130-second *inactivity* timer on each accepted Worker message, including GPU-preflight task progress. The timer is not a benchmark duration limit: long runs can continue while reporting progress. Stale timer callbacks are invalidated by generation numbers. On timeout, the UI marks the current run as failed and terminates the Worker; no intermediate measurements are certified. Stop/failure/completion always disarm the watchdog.
+
+**GPU multi-task compatibility:** `core/gpu-preflight-plan.js` inspects every task in the selected suite, compiles/checks kernels once per **unique input/output shape** (Core 6: four; Extended 10: six for the current datasets), and reports per-task progress. One shape failing preflight causes **uniform CPU fallback** when the user selects automatic mode; GPU-required mode fails explicitly instead of silently mixing CPU and GPU task measurements. This still needs WebGPU hardware acceptance testing: mock/unit tests do not prove device-driver correctness.
+
+**Tests:** `tests/evaluation-lifecycle.test.js` and `tests/gpu-preflight-plan.test.js` check phase, staleness, timer races, multi-task topology coverage, GPU failure propagation and UI integration. `npm test`, `npm run check`, and `npm run build:sites-static` must pass on the final SHA before merge.
+
+**Terminal UI outcomes:** `suiteDisplayStatus` reports partial, failed and cancelled evaluations as **uncertified**, never as a perpetual ‘awaiting final notification’ state. Completed task messages alone do not certify success.
