@@ -13,9 +13,9 @@ function makeReport({
   name,seed,backend,dtype,failed:false,
   metricName:dataset==='wave'||dataset==='chirp'?'RMSE':'Accuracy',
   test:{metric:dataset==='wave'||dataset==='chirp'?.25:.85},
-  config:{steps,batch:64,hidden:[32,32],learningRate:.001}
+  config:{steps,batch:64,hidden:[32,32],learningRate:.001,optimizer:'Adam'}
  })));
- return {dataset,mode,settings:{seeds},runs};
+ return {dataset,mode,datasetVersion:'test',settings:{steps,seeds,hidden:[32,32],batch:64,optimizer:'Adam',learningRate:.001},runs};
 }
 test('all matched four activations produce an auditable quick benchmark',()=>{
  const a=auditSingleBenchmark(makeReport());
