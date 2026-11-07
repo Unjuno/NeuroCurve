@@ -3,12 +3,13 @@ import assert from 'node:assert/strict';
 import {scoreSuite,SUITES,relativeTaskScore} from '../public/core/suite.js';
 import {makeDataset} from '../public/core/data.js';
 
-const result=(dataset,seed,custom=0.84,baseline=0.80,task='classification')=>({dataset,mode:'quick',datasetVersion:'test',settings:{seeds:[seed]},runs:[
- {name:'Custom',seed,test:{metric:custom},backend:'native-js-cpu',dtype:'float64'},
- {name:'ReLU',seed,test:{metric:baseline},backend:'native-js-cpu',dtype:'float64'},
- {name:'Swish',seed,test:{metric:baseline},backend:'native-js-cpu',dtype:'float64'},
- {name:'GELU',seed,test:{metric:baseline},backend:'native-js-cpu',dtype:'float64'}
- ],task});
+const result=(dataset,seed,custom=0.84,baseline=0.80,task='classification')=>{
+ const kind=(dataset==='wave'||dataset==='chirp')?'regression':'classification';
+ const run=(name,value)=>({name,seed,failed:false,test:{metric:value},metricName:kind==='regression'?'RMSE':'Accuracy',
+  backend:'native-js-cpu',dtype:'float64',config:{steps:150,batch:64,hidden:[32,32],learningRate:.001,optimizer:'Adam'}});
+ return {dataset,mode:'quick',datasetVersion:'test',settings:{steps:150,seeds:[seed],hidden:[32,32],batch:64,optimizer:'Adam',learningRate:.001},
+ runs:[run('Custom',custom),run('ReLU',baseline),run('Swish',baseline),run('GELU',baseline)],task};
+};
 
 test('relative game score is neutral at reference, improves for lower error and respects metric direction',()=>{
  assert.equal(relativeTaskScore(.2,.2),50);

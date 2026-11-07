@@ -40,3 +40,9 @@ Any extra, failed, duplicated, missing or off-protocol run invalidates the suite
 6. Verify fresh public login-free visit at existing URL and ensure no 'offline only' banner if sharing actually enabled.
 
 **Do not merge as production-ready without Steps 2–6.**
+
+## Protocol consistency (2026-11-08)
+
+Both single-task and cross-task scoring now call the same pure `inspectBenchmarkProtocol` in `public/core/benchmark-protocol.js`. This enforces the official 1×150 or 5×600 seed/update budget, all four paired activation functions, fixed architecture 32→32, Adam learning rate 0.001, batch size 64, correct metric name and range, no failed/duplicate/missing runs, and CPU Float64 or WebGPU Float32 backend consistency. The training engine imports its seed/update modes from this same module so that validation cannot silently diverge from execution.
+
+A different hyperparameter, unapproved seed, missing flag, invalid metric or mixed/unknown backend makes the corresponding task ineligible, and **no overall score is certified**. Per-task successful raw values may still be inspected. This checks self-reported protocol consistency, not proof of real execution or independent statistical superiority. The new tests reproduce accepted off-protocol scores before the fix and reject them afterward.

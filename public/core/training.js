@@ -1,4 +1,5 @@
 import {SUITES,scoreSuite} from './suite.js';
+import {PROTOCOL_MODES} from './benchmark-protocol.js';
 import {rng,normal,makeDataset,loadDataset} from './data.js';
 import {compileDefinition,analyze,wells,ENGINE,selfTest} from './activation.js';
 /** Minimal audited MLP. Float64 arrays, analytic activation derivatives, Adam. */
@@ -49,7 +50,7 @@ export async function trainOne(def,data,options={},onProgress=()=>{},cancelled=(
   for(const row of data.validation.slice(0,128)){network.forward(row.x);for(let l=0;l<network.z.length-1;l++)for(let i=0;i<network.z[l].length;i++){const z=network.z[l][i],d=network.der[l][i];total++;if(d<0)negative++;if(Math.abs(d)<.01)flat++;if(z<def.domain[0]||z>def.domain[1])outside++;for(const w of coverage)if(z>=w.center-w.left&&z<=w.center+w.right)w.count++;}}
   return {seed,backend:'native-js-cpu',dtype:'float64',engine:ENGINE,initialTrainLoss,finalTrainLoss:train.loss,train,validation,test,elapsedMs,history,metricName:data.task==='classification'?'Accuracy':'RMSE',maxGradientNorm,clippedSteps,gradientClip:5,activationDiagnostics:{samples:total,negativeFraction:negative/total,flatFraction:flat/total,outsideFraction:outside/total,coverage:coverage.map(w=>({center:w.center,fraction:w.count/total}))},config:{steps,batch,hidden,learningRate:lr,optimizer:'Adam',betas:[.9,.999],epsilon:1e-8,initializer:'Glorot normal, identical random sequence'},failed:false};
 }
-export const MODES={quick:{steps:150,seeds:[17]},full:{steps:600,seeds:[17,29,43,71,101]}};
+export const MODES=PROTOCOL_MODES;
 export async function runBenchmark(def,dataset,mode='quick',onEvent=()=>{},cancelled=()=>false,digitRows=null,gpuRunner=null,gpuDevice=null){
   const a=analyze(def);if(!a.safe)throw new Error('数値診断を通過していません。関数を修正してください。');
   if(!Object.hasOwn(MODES,mode))throw new Error('評価モードが不正です。');
