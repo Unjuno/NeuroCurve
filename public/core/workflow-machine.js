@@ -61,7 +61,8 @@ export function transitionWorkflow(state,event){
   }
   case 'SELECTION_CHANGED':{
    if(typeof event.key!=='string'||!event.key||event.key===e.selection)return state;
-   return {...state,evaluation:{...e,selection:event.key,phase:e.phase==='complete'?'stale':e.phase}};
+   const terminal=['complete','partial','error','cancelled'].includes(e.phase);
+   return {...state,evaluation:{...e,selection:event.key,phase:terminal?'stale':e.phase}};
   }
   case 'RUN_START':{
    if(isEvaluationBusy(state)||!e.selection)return state;
@@ -78,11 +79,13 @@ export function transitionWorkflow(state,event){
   }
   case 'RUN_PARTIAL':{
    if(!isEvaluationBusy(state)||event.runId!==e.runId)return state;
-   return {...state,evaluation:{...e,phase:'partial',error:String(event.error??'incomplete benchmark')}};
+   const current=rev===e.runRevision&&e.selection===e.runSelection;
+   return {...state,evaluation:{...e,phase:current?'partial':'stale',error:String(event.error??'incomplete benchmark')}};
   }
   case 'RUN_FAILURE':{
    if(!isEvaluationBusy(state)||event.runId!==e.runId)return state;
-   return {...state,evaluation:{...e,phase:'error',error:String(event.error??'unknown error')}};
+   const current=rev===e.runRevision&&e.selection===e.runSelection;
+   return {...state,evaluation:{...e,phase:current?'error':'stale',error:String(event.error??'unknown error')}};
   }
   case 'RUN_CANCEL':{
    if(!isEvaluationBusy(state)||event.runId!==e.runId)return state;

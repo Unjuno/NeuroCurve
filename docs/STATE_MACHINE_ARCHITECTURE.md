@@ -71,3 +71,13 @@ The user may abandon an ambiguous POST only after affirming the deletion receipt
 **Tests:** `tests/evaluation-lifecycle.test.js` and `tests/gpu-preflight-plan.test.js` check phase, staleness, timer races, multi-task topology coverage, GPU failure propagation and UI integration. `npm test`, `npm run check`, and `npm run build:sites-static` must pass on the final SHA before merge.
 
 **Terminal UI outcomes:** `suiteDisplayStatus` reports partial, failed and cancelled evaluations as **uncertified**, never as a perpetual ‘awaiting final notification’ state. Completed task messages alone do not certify success.
+
+## 2026-11-08 — Single-task result integrity and actionable failed-task status
+
+A single selected task is not a completed *comparison* merely because its Worker emits `complete`. The fixed protocol requires **four distinct activation functions** (Custom, ReLU, Swish, GELU) for each prescribed seed: quick uses seed 17 and 150 updates, full uses seeds 17/29/43/71/101 and 600 updates. Each run requires finite in-range Accuracy/RMSE, the matching metric kind, consistent CPU/GPU backend and dtype, and common MLP 32→32, batch 64, Adam LR 0.001. The pure `core/result-integrity.js` auditor validates the actual report and returns exact reasons; it cannot certify self-reported scores against tampering by a remote actor.
+
+The local UI transitions to `partial` for incomplete single-task experiments and displays the number and first reason for failures instead of always reporting evaluation complete. Raw results are preserved for inspection and download; **they are not passed off as a valid full comparison**. In multi-task mode, unavailable datasets and failed activation runs are shown as named failures with bounded user-visible reasons using `textContent`, without silently excluding them.
+
+Changing evaluation settings after a completed, partially failed, cancelled or failed run marks the prior terminal evaluation as **stale**. Failures following edits to a curve during a run are also stale, since they refer to an older revision. Terminal UI repaint occurs even when a Worker produced zero tasks. The browser-local learning engine and opt-in-only storage rules are unchanged.
+
+Verification: `tests/result-integrity.test.js`, `tests/workflow-terminal-selection.test.js`, unit suite, syntax/dataset checks, offline Sites build; CI on the final SHA is required. Production Sites sharing and real hardware GPU training remain separate unverified gates.

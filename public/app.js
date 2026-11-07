@@ -1,6 +1,7 @@
 import {defaultDefinition,validateDefinition,compileDefinition,analyze,PRESETS,PARAMS,samplePoints,inspectSketch} from './core/activation.js';
 import {exportPython,functionCSV,curveSVG} from './core/export.js';
 import {summarize} from './core/training.js';
+import {auditSingleBenchmark,describeTaskFailure} from './core/result-integrity.js';
 import {initialWorkflow,transitionWorkflow,isEvaluationBusy,isCurrentResult,canCertifySuiteScore,suiteDisplayStatus,maySubmitShare,mayRecoverShare,workflowLabel} from './core/workflow-machine.js';
 import {normalizeStrokePoints} from './core/sketch-stroke.js';
 import {createWorkerWatchdog} from './core/worker-watchdog.js';
@@ -28,7 +29,7 @@ function renderWorkflowStatus(){
   isEvaluationBusy(workflow)?'この端末で学習しています。実行中に曲線を変更すると結果は履歴扱いになります。':
   phase==='complete'?'評価完了。タスク別の実測値と基準関数との差を確認できます。':
   phase==='error'?'学習が停止しました。実行デバイスや関数の安全性を確認してください。':
-  phase==='partial'?'一部の課題が失敗しました。総合スコアは確定しません。タスク別結果と失敗理由を確認してください。':
+  phase==='partial'?'一部の学習が完了していません。現在の結果は暫定値です。失敗理由と実験ログを確認してください。':
   workflow.sharing.enabled?'曲線を作成し、学習評価した後に必要なら共有できます。':'手描き・解析・評価は端末内で実行します。URL共有は接続待ちです。';
 }
 function dispatchWorkflow(event){
@@ -159,6 +160,13 @@ function drawLoss(){const canvas=$('loss-canvas'),box=canvasSize(canvas);if(!box
 function renderResults(){const lower=DATASET_TASK[state.runConfig?.dataset??$('dataset').value]==='regression',summary=summarize(state.runs,lower),body=$('results-body');body.replaceChildren();$('metric-heading').textContent=lower?'RMSE / 中央値':'正解率 / 中央値';for(const g of summary.groups){const tr=document.createElement('tr');if(g.name==='Custom')tr.className='custom';const metric=v=>v===null?'—':lower?fmt(v,4):(v*100).toFixed(2)+'%';for(const text of [g.name,metric(g.median),g.n?`${metric(g.min)} – ${metric(g.max)}`:'—',g.elapsedMedianMs===null?'—':fmt(g.elapsedMedianMs/1000,2)+' s',state.runs.find(r=>r.name===g.name&&!r.failed)?.backend??'—',`${g.n} / ${g.failures}`]){const td=document.createElement('td');td.textContent=text;tr.append(td);}body.append(tr);}
   const paired=$('paired-results');paired.replaceChildren();for(const c of summary.comparisons){const p=document.createElement('p');p.textContent=`対 ${c.baseline}: シード対応平均差 ${c.meanDifference===null?'—':lower?fmt(c.meanDifference,5):fmt(c.meanDifference*100,3)+' ポイント'} (${c.pairs}ペア) / UNCERTAIN — 一般的な優位性は未検証`;paired.append(p);}
   $('run-diagnostics').textContent=JSON.stringify(state.runs.map(r=>({name:r.name,seed:r.seed,backend:r.backend,dtype:r.dtype,validation:r.validation,test:r.test,initialTrainLoss:r.initialTrainLoss,finalTrainLoss:r.finalTrainLoss,maxGradientNorm:r.maxGradientNorm,clippedSteps:r.clippedSteps,activationDiagnostics:r.activationDiagnostics,activationLut:r.activationLut,gradientAudit:r.gradientAudit,gpuSetupMs:r.gpuSetupMs,config:r.config,error:r.error})),null,2);
+  const single=state.result&&state.result.kind!=='suite'?auditSingleBenchmark(state.result):null;
+  $('single-result-status').hidden=!single;
+  if(single){
+    $('single-result-status').textContent=single.complete?
+      '単一課題の比較が完了しました。結果はこの端末内の探索的な実測値です。':
+      '単一課題の比較は未完了です。失敗した実行や数値異常があります。'+(single.failures[0]??'');
+  }
 }
 /** A score is valid only for its exact curve and chosen benchmark settings. */
 function matchesRunSelection(){
@@ -216,14 +224,15 @@ function renderSuiteScore(){
   const task=score.tasks.find(t=>t?.id===name),report=state.suiteReports.find(r=>r.dataset===name),tr=document.createElement('tr');
   if(task?.score>50)tr.classList.add('better');
   const format=(n,type)=>Number.isFinite(n)?type==='classification'?(n*100).toFixed(2)+'%':n.toFixed(4):'—';
-  const col=[TASK_LABEL[name],DATASET_TASK[name]==='classification'?'分類':'回帰',task?format(task.customMedian,task.type):'—',task?format(task.baselineMedian,task.type):'—',task?task.score.toFixed(2):'—',task?'完了':report?'失敗 / データを確認':'未実行'];
+  const failureCause=report&&!task?describeTaskFailure(report):null;
+  const col=[TASK_LABEL[name],DATASET_TASK[name]==='classification'?'分類':'回帰',task?format(task.customMedian,task.type):'—',task?format(task.baselineMedian,task.type):'—',task?task.score.toFixed(2):'—',task?'完了':report?'失敗：'+failureCause:'未実行'];
   for(const value of col){const td=document.createElement('td');td.textContent=value;tr.append(td);}table.append(tr);
   // Mobile: a readable task-by-task card; desktop retains the precise table.
   const article=document.createElement('article');article.className='task-score-card';article.setAttribute('role','listitem');
   const heading=document.createElement('div');heading.className='task-card-heading';const label=document.createElement('strong');label.textContent=TASK_LABEL[name];const scoreNumber=document.createElement('strong');scoreNumber.className='task-card-number';scoreNumber.textContent=task?`${task.score.toFixed(2)} / 100`:'未完了';if(task?.score>50)scoreNumber.classList.add('above-baseline');heading.append(label,scoreNumber);
   const meter=document.createElement('div');meter.className='task-score-meter';const progress=document.createElement('progress');progress.max=100;progress.value=task?.score??0;progress.setAttribute('aria-label',`${TASK_LABEL[name]}：${task?.score.toFixed(2)??'未評価'}点、基準50点`);meter.append(progress);
   const desc=document.createElement('p');desc.textContent=`${DATASET_TASK[name]==='classification'?'正解率':'RMSE'}：Custom ${task?format(task.customMedian,task.type):'—'} / 基準 ${task?format(task.baselineMedian,task.type):'—'}`;
-  const stateText=document.createElement('small');stateText.textContent=task?(task.score>50?'基準より良好':task.score<50?'基準未満':'基準と同等'):report?'失敗 / データを確認':'未実行';
+  const stateText=document.createElement('small');stateText.textContent=task?(task.score>50?'基準より良好':task.score<50?'基準未満':'基準と同等'):report?'失敗：'+describeTaskFailure(report):'未実行';
   article.append(heading,meter,desc,stateText);cards.append(article);
  }
  const ready=certified;
@@ -258,11 +267,11 @@ $('share-score-pack').onclick=async()=>{
  else{download(name,file);toast('共有用JSONを保存しました。ファイルを送る相手を自分で選んでください。公開URLではありません。');}}
  catch(e){if(e.name!=='AbortError')toast('ファイル共有に失敗しました。保存してから共有してください。');}
 };
-function finishWorker(){workerWatchdog?.stop();workerWatchdog=null;$('workspace').inert=false;state.worker?.terminate();state.worker=null;state.busy=isEvaluationBusy(workflow);$('stop-training').disabled=true;$('dataset').disabled=false;$('benchmark-mode').disabled=false;$('compute-backend').disabled=false;$('evaluation-scope').disabled=false;scopeChanged();$('start-training').disabled=!state.analysis.safe;}
+function finishWorker(){workerWatchdog?.stop();workerWatchdog=null;$('workspace').inert=false;state.worker?.terminate();state.worker=null;state.busy=isEvaluationBusy(workflow);$('stop-training').disabled=true;$('dataset').disabled=false;$('benchmark-mode').disabled=false;$('compute-backend').disabled=false;$('evaluation-scope').disabled=false;scopeChanged();if($('evaluation-scope').value!=='single')renderSuiteScore();$('start-training').disabled=!state.analysis.safe;}
 $('start-training').onclick=()=>{
   if(state.busy||!state.analysis.safe)return;if(!window.Worker)return toast('このブラウザはWorkerに対応していません。');
    if(!dispatchWorkflow({type:'RUN_START'}))return;const runId=workflow.evaluation.runId;
-  state.runConfig={scope:$('evaluation-scope').value,dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value};state.suiteReports=[];state.scoreStale=false;renderSuiteScore();state.backendInfo=null;$('effective-backend').textContent='GPU検査待ち / CPUも利用可';$('compute-backend').disabled=true;$('evaluation-scope').disabled=true;state.runs=[];state.loss={};state.result=null;$('export-results').disabled=true;$('start-training').disabled=true;$('stop-training').disabled=false;$('dataset').disabled=true;$('benchmark-mode').disabled=true;$('training-progress').value=0;$('training-status').textContent='初期化中 / この端末で実行';$('paired-results').replaceChildren();$('results-body').replaceChildren();drawLoss();
+  state.runConfig={scope:$('evaluation-scope').value,dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value};state.suiteReports=[];state.scoreStale=false;renderSuiteScore();state.backendInfo=null;$('effective-backend').textContent='GPU検査待ち / CPUも利用可';$('compute-backend').disabled=true;$('evaluation-scope').disabled=true;state.runs=[];state.loss={};state.result=null;$('export-results').disabled=true;$('start-training').disabled=true;$('stop-training').disabled=false;$('dataset').disabled=true;$('benchmark-mode').disabled=true;$('training-progress').value=0;$('training-status').textContent='初期化中 / この端末で実行';$('paired-results').replaceChildren();$('results-body').replaceChildren();$('single-result-status').hidden=true;$('single-result-status').textContent='';drawLoss();
   let worker;try{worker=new Worker('/worker.js',{type:'module'});}catch{dispatchWorkflow({type:'RUN_FAILURE',runId,error:'Workerを開始できません'});$('training-status').textContent='起動失敗: Workerを開始できません。';finishWorker();return;}state.worker=worker;$('workspace').inert=true;
   workerWatchdog=createWorkerWatchdog({
    onTimeout:phase=>{
@@ -285,7 +294,26 @@ $('start-training').onclick=()=>{
     else if(e.type==='self-test'){$('training-detail').textContent=`数学自己検査: ${e.result.checked}点 / 最大微分誤差 ${e.result.maxError.toExponential(2)}`;}else if(e.type==='run-start'){$('training-status').textContent=`${e.name} を学習中`;$('training-detail').textContent=`seed ${e.seed} · ${e.index+1}/${e.total} 実行`;state.loss[`${e.name}:${e.seed}`]=[];}
     else if(e.type==='progress'){state.loss[`${e.name}:${e.seed}`].push({step:e.step,loss:e.loss});$('training-progress').value=e.taskCount?(e.taskIndex+(e.index+e.step/e.steps)/e.total)/e.taskCount:(e.index+e.step/e.steps)/e.total;$('training-detail').textContent=`seed ${e.seed} · ${e.step}/${e.steps} 更新 · ${e.index+1}/${e.total} 実行`;drawLoss();}
     else if(e.type==='run-end'){state.runs.push(e.run);renderResults();}
-    else if(e.type==='complete'){dispatchWorkflow({type:e.result?.kind==='suite'&&!e.result.score?.complete?'RUN_PARTIAL':'RUN_SUCCESS',runId,error:'一部課題が失敗'});state.result=e.result;state.scoreStale=workflow.evaluation.phase==='stale';state.result.environment={userAgent:navigator.userAgent,logicalProcessors:navigator.hardwareConcurrency??null,backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown',clock:'not fixed / not available from browser'};if(state.result.kind==='suite'){state.suiteReports=state.result.reports;renderSuiteScore();$('training-status').textContent=state.result.score.complete?'全課題の評価が完了':'全課題を実行・一部失敗';}else{$('training-status').textContent=`評価終了 / ${state.runs.filter(r=>!r.failed).length} 成功・${state.runs.filter(r=>r.failed).length} 失敗`;} $('training-detail').textContent='結果はこのタブ内のみ。サーバーに送信していません。';$('training-progress').value=1;$('export-results').disabled=false;finishWorker();renderResults();}
+    else if(e.type==='complete'){
+      const audit=e.result?.kind==='suite'?null:auditSingleBenchmark(e.result);
+      const incomplete=e.result?.kind==='suite'?!e.result.score?.complete:!audit.complete;
+      dispatchWorkflow({type:incomplete?'RUN_PARTIAL':'RUN_SUCCESS',runId,error:'一部課題が失敗'});
+      state.result=e.result;state.scoreStale=workflow.evaluation.phase==='stale';
+      state.result.environment={userAgent:navigator.userAgent,logicalProcessors:navigator.hardwareConcurrency??null,backend:state.backendInfo?.effective??'unknown',dtype:state.backendInfo?.dtype??'unknown',clock:'not fixed / not available from browser'};
+      if(state.result.kind==='suite'){
+        state.suiteReports=state.result.reports;renderSuiteScore();
+        $('training-status').textContent=state.result.score.complete?'全課題の評価が完了':'全課題を実行・一部失敗';
+      }else{
+        state.runs=state.result.runs??[];
+        $('training-status').textContent=audit.complete?
+          `評価終了 / ${state.runs.length} 実行成功`:
+          `単一課題の比較は未完了 / ${audit.failures.length} 件の整合性問題`;
+      }
+      $('training-detail').textContent=incomplete?
+        '総合的な比較は未完了です。失敗の理由と実験ログを確認して再実行してください。':
+        '結果はこのタブ内のみ。サーバーに送信していません。';
+      $('training-progress').value=1;$('export-results').disabled=false;finishWorker();renderResults();
+    }
     else if(e.type==='error'){dispatchWorkflow({type:'RUN_FAILURE',runId,error:e.message});$('training-status').textContent='実行停止: '+e.message;finishWorker();}};
   worker.onerror=e=>{if(state.worker!==worker||workflow.evaluation.runId!==runId)return;dispatchWorkflow({type:'RUN_FAILURE',runId,error:e?.message??'Worker error'});$('training-status').textContent='実行エラー。ブラウザまたは共通データの取得状況を確認してください。';finishWorker();};
   worker.postMessage({type:'start',definition:clone(state.def),dataset:$('dataset').value,mode:$('benchmark-mode').value,backend:$('compute-backend').value,scope:$('evaluation-scope').value});
